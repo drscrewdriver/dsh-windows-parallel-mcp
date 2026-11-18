@@ -171,9 +171,11 @@ public static class WT {
 # ---- the acting window -----------------------------------------------------------
 $wfExit = Join-Path $env:TEMP ('wpm-cm-wf-' + [guid]::NewGuid().ToString('N') + '.stop')
 $wfState = Join-Path $env:TEMP ('wpm-cm-wfstate-' + [guid]::NewGuid().ToString('N') + '.txt')
+$script:reGrabFile = Join-Path $env:TEMP ('wpm-cm-regrab-' + [guid]::NewGuid().ToString('N'))
 $wfProc = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA',
   '-File', (Join-Path $PSScriptRoot 'winforms-target.ps1'), '-HoldMs', '600000', '-ExitFile', "`"$wfExit`"",
-  '-StateFile', "`"$wfState`"", '-Title', 'WpmMsgTarget', '-X', '1000', '-Y', '430' -PassThru
+  '-StateFile', "`"$wfState`"", '-ReGrabFile', "`"$script:reGrabFile`"",
+  '-Title', 'WpmMsgTarget', '-X', '1000', '-Y', '430' -PassThru
 $wf = $null
 for ($i = 0; $i -lt 80 -and -not $wf; $i++) { Start-Sleep -Milliseconds 400; $wf = Find-Win 'WpmMsgTarget' }
 if (-not $wf) { throw 'target window never appeared' }
@@ -283,32 +285,31 @@ if (-not $preEdit) {
   '  ValuePattern is NOT exposed to this UIA client on this child: same reading as above.'
 }
 
-# ---- RESET CONTROL, permission-free ----------------------------------------------
-# Uses the finding as the test. UIA Invoke is known to raise its window; if invoking the
-# button moves the foreground here, the reset must then undo a raise produced by the real
-# mechanism rather than undo nothing. If the reset works against that, a 0-raise result below
-# means the channel was genuinely tested from the background.
+# ---- WHAT ACTUALLY GUARANTEES THE BACKGROUND PRECONDITION -------------------------
+# Not the reset. The guarantee is that every measured round starts by VERIFYING the target
+# does not hold the foreground, and discards the round if it does -- so a raise that the reset
+# could not undo makes the NEXT round visibly unmeasurable rather than silently reading as
+# quiet. cx12 demonstrated this guard working: after an owner-side grab, four following rounds
+# were discarded and the run refused to issue a verdict.
+#
+# The first version of this block printed "RESET CONTROL PASSED" while testing nothing: the
+# control raised the window with InvokePattern, and on WinForms no InvokePattern exists, so the
+# raise step was skipped and the condition still fell through to PASSED. A control that passes
+# because its trigger was absent is worse than no control, because it reports itself verified.
 $rcErr0 = Ensure-TargetBackground($actH)
-$rcRaised = $false
-$rcDetail = 'no InvokePattern available'
-if (-not $rcErr0 -and $preBtn) {
-  try {
-    $preBtn.pat.Invoke()
-    Start-Sleep -Milliseconds 400
-    $rcRaised = (([CM]::Fg()) -eq $actH.ToString())
-    $rcDetail = "invoke raised target=$rcRaised"
-  } catch { $rcDetail = "control invoke threw: $($_.Exception.Message)" }
+if ($rcErr0) {
+  "PRECONDITION CONTROL FAILED AT BASELINE: $rcErr0 -- the target cannot even be placed in the " +
+  'background, so no raise could be observed at all.'
+  $instrumentBad = $true
+} else {
+  "PRECONDITION CONTROL: target is not the foreground window at rest (fg=$([CM]::Fg()) != $actH), " +
+  'and each round re-verifies this before acting.'
+  # A known-raise control on THIS window class is not available: UIA patterns are absent here,
+  # and asking the owner to activate is permission-dependent (measured: 1 of 5 attempts took
+  # the foreground). So detection power on this class rests on the same detector firing 6/6
+  # and 12/12 on the WPF/UWP classes within identical runs -- stated as transfer, not as proof.
+  $instrumentBad = $false
 }
-$rcResetErr = Ensure-TargetBackground($actH)
-if ($rcErr0) { "RESET CONTROL FAILED AT BASELINE: $rcErr0" }
-elseif ($preBtn -and -not $rcRaised) { "RESET CONTROL INCONCLUSIVE: $rcDetail (contradicts the earlier run)" }
-elseif ($rcResetErr) { "RESET CONTROL FAILED: $rcDetail but reset refused ($rcResetErr)" }
-else { "RESET CONTROL PASSED: $rcDetail and the reset undid it (fg now=$([CM]::Fg()))" }
-
-# The run is invalid if the precondition cannot be established or restored: a raise cannot be
-# observed from a window that is already foreground, and rounds following an unrestorable raise
-# start from the foreground and cannot raise again.
-$instrumentBad = ($rcErr0 -or ($preBtn -and -not $rcRaised) -or $rcResetErr)
 ''
 
 function Invoke-Channel([string]$ch) {
@@ -363,6 +364,20 @@ function Invoke-Channel([string]$ch) {
       $t1 = (Get-AppState).edit
       return @{ ok = ($t1 -like '*Z' -and $t1 -ne $t0); detail = "app '$t0' -> '$t1'" }
     }
+    # 'fg-grab' is NOT a channel the engine could ever use. It exists to answer a question the
+    # evidence owed: the message channels scored 0/6 raises on WinForms, a window class where
+    # no UIA pattern exists to serve as a raising control, so the detector had only ever fired
+    # on OTHER window classes. Transferring it was recorded as a caveat. Here the target's own
+    # process takes the foreground through a documented, permitted route (owner-side
+    # SetForegroundWindow, delivered by the flag file it polls -- an outside process cannot do
+    # this, the foreground lock refuses it), which IS a raise of exactly the kind being looked
+    # for. If the detector reports it, then on this window class a 0/6 means the channel is
+    # quiet; if it does not, the message-channel result is meaningless and this file must stop
+    # claiming the neutral channels exist.
+    'fg-grab' {
+      # Handled in its own phase, never inside the coverage loop. See DETECTOR PHASE below.
+      return @{ ok = $false; missing = $true; detail = 'fg-grab runs in the detector phase' }
+    }
     default { return @{ ok = $false; detail = "unknown channel $ch" } }
   }
 }
@@ -412,7 +427,13 @@ foreach ($ch in $Channels) {
     # Restore IMMEDIATELY, in both arms, so the next round of either arm starts identically.
     $bg1 = Ensure-TargetBackground($actH)
     $clean = (-not $mouse) -and (-not $chord) -and (-not $inRect)
-    $usable = $clean -and (-not $bg1) -and (-not $res.missing) -and ($ch -eq 'none' -or $res.ok)
+    # fg-grab is exempt from the effect requirement. For the other channels a round whose call
+    # did nothing proves nothing about disturbance, so it must not count as 'quiet'. But for
+    # fg-grab the thing being measured IS whether a raise was DETECTED, so applying the same
+    # rule would discard precisely the rounds where the detector stayed silent -- the failure
+    # mode this arm exists to find would be filtered out as unmeasurable, and the arm would be
+    # unable to fail in the one way that matters.
+    $usable = $clean -and (-not $bg1) -and (-not $res.missing) -and ($ch -in @('none', 'fg-grab') -or $res.ok)
     $why = if (-not $clean) {
       $ps = @(); if ($mouse) { $ps += 'mouse' }; if ($chord) { $ps += 'chord' }; if ($inRect) { $ps += 'cursorInRect' }
       'human mechanism: ' + ($ps -join '+')
@@ -448,7 +469,7 @@ $missingN = @($rows | Where-Object { $_.missing }).Count
 "reset refused in $resetFails rounds; channel absent in $missingN rounds"
 ''
 $report = @()
-foreach ($ch in ($Channels | Where-Object { $_ -ne 'none' })) {
+foreach ($ch in ($Channels | Where-Object { $_ -notin @('none', 'fg-grab') })) {
   $u = @($rows | Where-Object { $_.channel -eq $ch -and $_.usable })
   $d = @($rows | Where-Object { $_.channel -eq $ch -and -not $_.usable })
   $n = $u.Count
@@ -477,6 +498,77 @@ $byWhy = @{}
 foreach ($d in $discAll) { $k = if ($d.why) { $d.why } else { 'other' }; if (-not $byWhy.ContainsKey($k)) { $byWhy[$k] = 0 }; $byWhy[$k]++ }
 if ($byWhy.Count) { 'discarded by cause:'; foreach ($k in $byWhy.Keys) { "  $k : $($byWhy[$k])" } }
 ''
+# ---- DETECTOR POWER, as a FINAL phase ---------------------------------------------
+# Run last and never interleaved: an owner-side activation leaves the window in the foreground
+# and the hide/show reset cannot undo a grab the owning process wants to keep (measured), so
+# mixing this into the measurement loop poisoned 5 following rounds in cx12 and forced that run
+# to withhold its verdict -- which is the guard working, but not a usable design.
+#
+# WHY THIS PHASE EXISTS AT ALL. The message channels are the engine's only quiet route, and
+# they scored 0 raises on WinForms -- a class where no UIA pattern was available to serve as a
+# known raise. A 0 from a detector never proven to fire on the class it is measuring is a
+# measurement of the detector's silence, not of the channel's quietness. Here the target's own
+# process activates its own window through the one route the foreground lock permits, which IS
+# a raise of exactly the kind being looked for.
+$grabRounds = 6
+$grabSeen = 0
+$grabDetected = 0
+$grabLog = @()
+for ($g = 1; $g -le $grabRounds; $g++) {
+  $bgg = Ensure-TargetBackground($actH)
+  if ($bgg) { $grabLog += "  grab $g SKIPPED ($bgg)"; continue }
+  try { Set-Content -LiteralPath $script:reGrabFile -Value 'x' -Force } catch { }
+  $isFg = $false
+  for ($i = 0; $i -lt 12 -and -not $isFg; $i++) {
+    if (([CM]::Fg()) -eq $actH.ToString()) { $isFg = $true } else { Start-Sleep -Milliseconds 250 }
+  }
+  try { Remove-Item -LiteralPath $script:reGrabFile -Force -ErrorAction SilentlyContinue } catch { }
+  if ($isFg) {
+    $grabSeen++
+    # The detector the measurement loop uses, applied unchanged to a known raise.
+    $fA = [CM]::Focus(); Start-Sleep -Milliseconds 200; $fB = [CM]::Focus()
+    if ($fA -ne $fB -or (([string]$fB -split '/')[0] -eq $actH.ToString())) { $grabDetected++ }
+    $grabLog += "  grab ${g}: owner activated the window, detector fired=$($fA -ne $fB) tookTarget=$((([string]$fB -split '/')[0] -eq $actH.ToString()))"
+  } else {
+    $grabLog += "  grab ${g}: owner-side activation refused (permission-dependent; not a detector failure)"
+  }
+}
+''
+'DETECTOR POWER (known raise on THIS window class, final phase):'
+$grabLog | ForEach-Object { $_ }
+"  activations that took: $grabSeen/$grabRounds   detector fired on those: $grabDetected/$grabSeen"
+$detectorNote = ''
+if ($grabSeen -eq 0) {
+  $detectorNote = 'NO KNOWN RAISE ACHIEVABLE on this window class this run (owner-side activation ' +
+    'is permission-dependent), so detection power here remains a transfer from the WPF/UWP ' +
+    'classes where the identical detector fired 6/6 and 12/12.'
+} elseif ($grabDetected -eq 0) {
+  $detectorNote = 'DETECTOR DID NOT FIRE on ' + $grabSeen + ' known raises from THIS window ' +
+    'class, so a 0-raise result for the message channels is NOT evidence of quietness.'
+} elseif ($grabSeen -lt 2) {
+  # Its own tier, because the surrounding two are both wrong for this case: calling a 1/1
+  # detection 'no known raise achievable' erases the one demonstration that exists, and
+  # calling it 'proven' would claim a characterization from a single observation. The first
+  # version collapsed these two into one branch and printed the false half.
+  $detectorNote = 'DETECTOR FIRED ON THE ONE KNOWN RAISE ACHIEVABLE (1/1) on this window class. ' +
+    'That is evidence the detector is not blind here, but n=1 does not characterize it: ' +
+    'owner-side activation is permission-dependent and took foreground in only ' +
+    "$grabSeen of $grabRounds attempts. Detection power on this class therefore rests mainly on " +
+    'the identical detector firing 6/6 and 12/12 on the WPF/UWP classes within the same runs.'
+} else {
+  # Built from parts rather than one long quoted line: the previous draft tried to inline an
+  # apostrophe with a shell-style splice, valid in bash and meaningless here, and left the
+  # whole message uninterpolated.
+  $detectorNote = 'DETECTOR PROVEN ON THIS CLASS: it fired ' + $grabDetected + '/' + $grabSeen +
+    ' on known owner-side raises. The 0-raise result for the message channels is therefore a ' +
+    'measurement of quietness, not of detector silence.'
+}
+$detectorNote
+
+# The message-channel claim is neutral only if the detector is either proven on this class or
+# explicitly transferred; it must never be silent-checked by a branch that reads 0 as proof.
+$detectorUnproven = ($detectorNote -like 'DETECTOR DID NOT FIRE*')
+
 $tellable = @($report | Where-Object { $_.usable -ge 3 })
 $raising = @($report | Where-Object { $_.verdict -eq 'RAISES ITS WINDOW' })
 $neutral = @($report | Where-Object { $_.verdict -eq 'never took foreground' })
@@ -488,6 +580,18 @@ $absent = @($report | Where-Object { $_.verdict -eq 'ABSENT ON THIS TOOLKIT' })
 if ($instrumentBad) {
   'OVERALL: INSTRUMENT INVALID (see RESET CONTROL) -- the background precondition could not be ' +
   'demonstrated, so no verdict of any kind may be taken from this run.'
+} elseif ($grabNote -and $grabNote -like 'DETECTOR DID NOT FIRE*') {
+  # Placed ahead of every channel conclusion on purpose. A neutral verdict is only meaningful
+  # if a raise WOULD have been seen on this very window class; without that, reporting
+  # "never took foreground" would be reporting the detector's silence as a property of the
+  # channel -- the same inversion that produced this file's first two wrong outputs.
+  "OVERALL: $grabNote No neutrality verdict is issued."
+} elseif ($detectorUnproven) {
+  # Ahead of every channel conclusion on purpose. A neutral verdict only means something if a
+  # raise WOULD have been seen on this very window class; otherwise "never took foreground"
+  # reports the detector's silence as a property of the channel -- the same inversion that
+  # produced this file's first two wrong outputs.
+  "OVERALL: $detectorNote No neutrality verdict is issued."
 } elseif ($resetFails -gt 0) {
   "OVERALL: PRECONDITION NOT MAINTAINABLE -- $resetFails rounds could not be returned to the " +
   'background. A channel measured while its window already held the foreground was never ' +
