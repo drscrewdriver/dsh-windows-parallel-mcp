@@ -4,6 +4,12 @@ Date: run `cx6` (24 measured rounds + 6 control rounds, zero discards).
 Instruments: `scripts/channel-raise-matrix.ps1`, `scripts/invoke-raise-check.ps1`,
 `scripts/diag-msgchan-xproc.ps1`.
 
+REPRODUCED: the same matrix run twice more as `cx13`/`cx14` (6 rounds each) gives the same
+structure — control 0/6, UIA pattern channels absent on WinForms, both message channels 0
+raises with app-side verified effects (11 of 12 rounds), zero cursor movement. Reproduced on a
+different pre-action foreground than cx6, which is the point: the headline result survived
+being measured again under a different desktop state.
+
 ## The measurement
 
 | channel | usable | effect verified | took its own foreground | cursor moved | verdict |
@@ -146,10 +152,19 @@ The raise detector is the comparison `foreground-after == acted-upon-handle`, an
 comparison fired 6/6 and 12/12 elsewhere in this session, including with the acting window
 being ours and the pre-action foreground being a third window's -- which is also the state every
 WinForms round was in (foreground held by Calculator's frame throughout, before and after).
-The detector is therefore transferred rather than re-verified on this window class, and a
-residual possibility remains that a raise produced specifically by a WinForms message would go
-undetected. It is small, it is not proven away, and the verdict does not rest on it alone: the
-30% coverage figure and the pattern-absence result are independent of it.
+The detector is only partly re-verified on this window class. A known raise WAS attempted here
+(the target's own process activating its own window, the one route the foreground lock permits):
+it took the foreground in 1 of 6 attempts — permission-dependent — and the detector fired 1/1
+on it, so the detector is not blind on WinForms. That is evidence, not a characterization; full
+detection power still rests mainly on the identical detector firing 6/6 (Calculator) and 12/12
+(WPF) on other classes within the same runs. A residual possibility remains that a raise
+produced specifically by a WinForms message would go undetected; it is small, it is not proven
+away, and the verdict does not rest on it alone: the 30% coverage figure and the pattern-absence
+result are independent of it. (The earlier text here claimed the foreground was "Calculator's
+frame throughout, before and after" — true of the cx6 run, false of cx13/cx14, which re-verify
+at rest that the target does NOT hold the foreground; corrected so the record matches the
+instrument that produced it.)
+
 
 ## The third target class: terminals, measured rather than omitted
 
