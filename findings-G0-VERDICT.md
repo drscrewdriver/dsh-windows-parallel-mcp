@@ -166,6 +166,40 @@ at rest that the target does NOT hold the foreground; corrected so the record ma
 instrument that produced it.)
 
 
+## Mitigating the raise: AttachThreadInput DOES unlock the hand-off (2026-11-19, unresolved)
+
+The G0 verdict killed R2 because UIA pattern actions raise their window, and an earlier check
+rejected *undoing* that on the grounds that `SetForegroundWindow` is refused to a non-owning
+process (measured 30/36). That rejection covered only the bare call. `fg-restore-attempt.ps1`
+tested the documented unlock — `AttachThreadInput` into the thread owning the current
+foreground, then `SetForegroundWindow` — and the key **turns**: AttachThreadInput succeeded
+6/6 and SetForegroundWindow returned TRUE 6/6, with the foreground held to +3s in most
+rounds. So the blanket statement "the damage cannot be undone from a separate process" is
+**false**; a bounded-disturbance UIA channel (raise, then reverse within tens of ms) is not
+dead on the old argument.
+
+But it is NOT yet bankable, for a reason that is itself the lesson:
+
+- **The decisive control is not reproducible across runs.** The persist arm (raise, then don't
+  touch) is supposed to show the raise STANDING so a restore "success" is causal, not ambient.
+  Run fgr3: persisted 4/4 (clean causal signal). Run fgr4: self-reverted 4/6. When the control
+  flips sign between adjacent runs of one command, no verdict follows — the run that would
+  "prove" the mitigation works is indistinguishable from the desktop settling.
+- **My own fix caused the flip.** fgr4 added `ReleaseOurs` = `ShowWindow(minimize)` then
+  `ShowWindow(SW_SHOWNA)` as per-round baseline hygiene (to stop a stuck-foreground cascade
+  that ate half of fgr3). Minimize is a foreground-affecting operation on the WPF window, so
+  the cleanup perturbed exactly the focus behaviour the persist arm measures — the same family
+  as "launch a process to test whether the desktop is idle": an instrument that disturbs its
+  subject while trying to steady it.
+- A separate, earlier defect (fgr3) was the denominator counting PRECOND-FAIL rounds as failed
+  restores; fixed by an explicit outcome whitelist.
+
+Status: mitigation is **promising but unresolved**. The correct next measurement is a single
+clean design — interleaved arms, one baseline method that does NOT perturb focus (e.g. restore
+via the proven AttachThreadInput path rather than minimize, and never between the persist
+observation points) — run at a higher round count. Until the persist control is stable, neither
+"the mitigation works" nor "it does not" is supported, and the product decision stays open.
+
 ## The third target class: terminals, measured rather than omitted
 
 G0 line 3 names three classes — browser, terminal, file manager. None was open at census time,
@@ -280,3 +314,27 @@ this run cannot distinguish those two, it must not claim to.
   version of this script drew the *opposite* conclusion from an empty control arm, printing
   "NO channel is foreground-neutral" with zero usable rounds. Absence of evidence rendered as
   evidence of absence, in the one place the plan depends on it.
+
+## 目标改写：R2 → R2′（2026-11-19，计划所有者决定）
+
+G0 判死的是 R2 的「不可见」半；计划所有者明确**接受秒级抢前台**后，可测靶子改为
+**有界干扰 + 自我逆转 + 可拒绝**（spec.md §R2′，12 条 + G0′ 5 项门禁）。要点：
+
+- 通道优先级维持实测结论并**倒转**：有消息门只用消息（抢前台 0/6、效果 6/6、光标 0px）；
+  无门才用 UIA，且必须计入「显著干扰档」并触发恢复。
+- 「光标零位移」保留为绝对断言（全通道 0px，从未被推翻）。
+- 恢复必须按 **HWND** 而非 pid（本机实测 `ApplicationFrameHost` 持有每个 UWP 框架，pid 归因两头都错）。
+- 恢复只在「当前前台 == 本次抬起的那个窗」时执行；被第三方抢走不动。这一条把「不抢主人新窗」
+  做成构造性质，而不是靠祈祷。
+- **对话框例外**：新前台与目标同 pid ⇒ 应用自己的对话框 ⇒ 不恢复，否则会把 AI 刚打开的
+  「另存为」废掉（框在但打不了字）。
+- **不做永久守护**：实测恢复后 3s 仍守住 7/10，丢掉的 3 次是别窗合法抢走；硬守会与主人抢。
+
+G0′ 未全过（尤其 G0′-1 归因稳定性）之前，P2 起仍禁止写引擎代码——与 G0 同一规则。
+
+**竞品对照（本次核实）**：`dongcaodeliyu/dsh-independent-input`（26★）主张「不抢输入焦点」但
+**未实现**——无焦点表/无恢复/无 `AttachThreadInput`，`FocusWindow`（Alt 技巧+采集 prev）与
+`Set-UiaFocus` 都是从未被调用的死代码，实际点击走实测 6/6 抬前台的 UIA pattern。
+⇒ 「焦点表 + 恢复 + 对话框判据」在公开插件里没有对应物，R2′ 的差异化独立成立。
+另 `mini-yifan/dsh-orb`（320★）走 `SendInput` 物理注入且主动抢前台，不主张并行，与本路线不冲突。
+
