@@ -151,7 +151,35 @@ residual possibility remains that a raise produced specifically by a WinForms me
 undetected. It is small, it is not proven away, and the verdict does not rest on it alone: the
 30% coverage figure and the pattern-absence result are independent of it.
 
+## The third target class: terminals, measured rather than omitted
+
+G0 line 3 names three classes — browser, terminal, file manager. None was open at census time,
+so the terminal was the one the ticked box quietly failed to cover. Measured directly
+(`probe-terminal-doors.ps1`, on a `wt.exe` window this script created and closed):
+
+```
+cls=CASCADIA_HOSTING_WINDOW_CLASS
+classic children: DRAG_BAR_WINDOW_CLASS, DesktopWindowContentBridge, InputSite.WindowClass
+  -> children that look like a text surface: 0
+UIA descendants: 21; elements carrying an addressable HWND: 2 (both chrome); Document: 0
+  tab/button elements all report native=0
+```
+
+Windows Terminal is the terminal family but a XAML/Composition host, and it behaves like
+`uap-framed`, not like `conhost`: the text surface has **no message door** (no edit-like child
+HWND) **and no `Document`/TextPattern element** to write through. Tab and button names came
+back localized (`关闭标签页`, `新建标签页`), re-confirming that Name cannot be used to gate
+reachability or safety.
+
+This is the sharpest consequence of the verdict for the narrow product: **the target class a
+developer would most want driven quietly — a terminal — is precisely the class the neutral
+channel cannot reach.** An engine that refuses foreground-raising actions could drive Notepad
+and the Explorer shell, and could not type into Windows Terminal. "Runs in parallel for a
+well-defined minority of targets" turns out to exclude the flagship use case, which is the kind
+of fact that should end a discussion about whether the minority scope is worth building.
+
 ## Verdict against the plan's own G0 criterion
+
 
 
 The checklist says: 覆盖率预估 → 成本收益判断, and *if the conclusion is "only a minority of
