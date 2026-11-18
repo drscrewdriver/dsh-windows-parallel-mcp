@@ -14,13 +14,26 @@ param(
   [int]$HoldMs = 90000,
   [string]$Title = 'WpmWinFormsTarget',
   [string]$ExitFile = '',
+  # Explicit position. Two targets launched by this script would otherwise both default to
+  # 60,60 and overlap EXACTLY, which silently breaks any experiment that guards on "the
+  # cursor never entered the target rectangle": with identical rects, a cursor over one is
+  # over both, and the guard cannot tell the acting window from the holder.
+  [int]$X = 60,
+  [int]$Y = 60,
   # After this many milliseconds the form takes the foreground ITSELF. It must be the
   # owning process that calls SetForegroundWindow: the foreground lock refuses the call
   # from any other process, so a driver script trying to background a target by activating
   # a window it does not own silently does nothing -- which is how the background-state
   # experiment reported a "background" reading for a window that was still foreground.
   # -1 disables.
-  [int]$GrabFgAfterMs = -1
+  [int]$GrabFgAfterMs = -1,
+  # When this file appears, the form takes the foreground AGAIN and deletes the file. It
+  # exists because an experiment can lose its foreground hand-off mid-run: the first
+  # attributed Calculator run found the target had kept the foreground from round 1 onward,
+  # so rounds 2-8 silently measured "act on a FOREGROUND app" under a header claiming
+  # background. Only the owning process may re-activate (the foreground lock refuses
+  # outsiders), so the request has to be delivered to the owner through a file it polls.
+  [string]$ReGrabFile = ''
 )
 $ErrorActionPreference = 'Stop'
 # WinForms' UIA providers are behind AppContext switches, and powershell.exe runs with
@@ -39,7 +52,7 @@ $form = New-Object System.Windows.Forms.Form
 $form.Text = $Title
 $form.Size = New-Object System.Drawing.Size(420, 300)
 $form.StartPosition = 'Manual'
-$form.Location = New-Object System.Drawing.Point(60, 60)
+$form.Location = New-Object System.Drawing.Point($X, $Y)
 $form.Topmost = $false
 $form.ShowInTaskbar = $true
 
@@ -82,6 +95,22 @@ $timer.Add_Tick({
       ((Get-Date) - $started).TotalMilliseconds -ge $GrabFgAfterMs) {
     $script:grabTried = $true
     try { $ok = [WinShow]::Grab($form.Handle); Write-Output ("GRAB=" + $ok) } catch { Write-Output ("GRAB=error " + $_.Exception.Message) }
+  }
+  # Foreground re-claim on request, CONTINUOUSLY while the flag file exists. The first
+  # version deleted the flag after one attempt, which made the driver's wait a race: if the
+  # form's 400ms tick happened to land in the wrong place, the request was consumed without
+  # effect and the driver reported an unrecoverable precondition that could have been fixed
+  # one tick later. The file's existence is the request, and its removal by the driver is
+  # the release -- so the owner keeps trying until told to stop, and no attempt is lost.
+  if ($ReGrabFile -and (Test-Path -LiteralPath $ReGrabFile)) {
+    if (-not $script:reGrabActive) { $script:reGrabActive = $true; Write-Output "REGRAB begin" }
+    try {
+      $ok = [WinShow]::Grab($form.Handle)
+      if ($ok) { $script:reGrabOk = $true }
+    } catch { Write-Output ("REGRAB=error " + $_.Exception.Message) }
+  } elseif ($script:reGrabActive) {
+    $script:reGrabActive = $false
+    Write-Output ("REGRAB end ok=$([bool]$script:reGrabOk)")
   }
 })
 $timer.Start()
