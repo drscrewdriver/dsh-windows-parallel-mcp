@@ -103,9 +103,11 @@ $timer.Add_Tick({
   if ($ExitFile -and (Test-Path -LiteralPath $ExitFile)) { $form.Close() }
   if ($StateFile) {
     # The oracle reads the .NET objects, never WM_GETTEXT: if both sides used the same read
-    # path, agreeing would prove nothing.
+    # path, agreeing would prove nothing. The button text is included because UIA Invoke is
+    # verified here too -- its Click handler changes $btn.Text, so the app is the authority on
+    # whether the click landed, and the element that was invoked is not.
     try {
-      Set-Content -LiteralPath $StateFile -Value ($edit.Text + "`t" + $edit2.Text) -Force -ErrorAction Stop
+      Set-Content -LiteralPath $StateFile -Value ($edit.Text + "`t" + $edit2.Text + "`t" + $btn.Text) -Force -ErrorAction Stop
     } catch { }
   }
   if (((Get-Date) - $started).TotalMilliseconds -gt $HoldMs) { $form.Close() }

@@ -55,6 +55,14 @@ pass = run('powershell encoding (BOM/UTF-8)', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// The parser cannot see bare static calls (`CHW::ByKind(...)` where `[CHW]::ByKind` is
+// required), so the parse gate above passes files that die at runtime. Five occurrences in
+// four files in one session, each discovered only after the experiment had started.
+pass = run('powershell static-call syntax', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-ps-calls.mjs', ...roots], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 const js = [].concat(...roots.map((rt) => walk(rt, ['.mjs', '.js'])));
 const jsFail = [];
 for (const f of js) {

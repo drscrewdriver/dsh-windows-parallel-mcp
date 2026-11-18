@@ -104,7 +104,55 @@ our own WinForms TextBox/Button/RichTextBox surface as `ControlType=Pane`, not a
 so a coverage figure drawn from actionable *control types* reports zero for the one family where
 the message channel demonstrably works.
 
+## The sharper finding: the two kinds of door are complementary AND mutually exclusive
+
+`probe-winform-patterns.ps1` asked UIA what the elements themselves claim to implement
+(`Current.SupportedPatterns`, which is the provider's own statement, not one failed
+`TryGetCurrentPattern` call), on our own WinForms window, with every legacy-accessibility
+AppContext switch set in BOTH the driver and the target:
+
+```
+descendants: 3
+  [0] ct=Pane native=1907024  name='abc'       patterns=        <- the EDIT child
+  [1] ct=Pane native=1905528  name='Press'     patterns=        <- the BUTTON child
+  [2] ct=Pane native=2367310  name='rich-abc'  patterns=        <- the RichEdit child
+  frame: ct=ControlType.Window patterns=
+```
+
+No control type, no patterns, nothing on the frame either. Yet those exact handles are the
+targets WM_CHAR and WM_SETTEXT write into successfully, verified app-side, 6/6 rounds.
+
+Combining this with the rest of the evidence gives a table that is more damning than a
+coverage percentage:
+
+| toolkit | UIA pattern door | message door | what the pattern door does |
+|---|---|---|---|
+| WinForms / classic Win32 | **absent** to this client | **present, and neutral** | — |
+| WPF | present | **absent** (no classic child HWNDs) | raises the window, 12/12 vs 0/12 control |
+| UWP/WinUI (`uap-framed`) | present (Calculator 8/8, Store) | absent (`NativeWindowHandle=0`) | raises the window |
+| Chromium / Electron | present (lazy a11y, page write 6/6) | absent | raises the window |
+
+So the quiet door exists only where the identifiable door does not, and the identifiable door
+exists only where acting through it is the thing that steals the desktop. There is no family
+on this machine where an agent can BOTH point at a specific control through UIA AND act on it
+without foreground disturbance. Any engine that wanted to be quiet would have to address
+controls by raw handle plus class plus rectangle -- positional matching -- which is the
+heuristic that previously made an experiment type into the browser's address bar while
+believing it had reached the page.
+
+**Detector caveat, stated rather than glossed.** The "message channels do not raise" result was
+measured on WinForms, where no UIA pattern was available to serve as an in-run raising control.
+The raise detector is the comparison `foreground-after == acted-upon-handle`, and the same
+comparison fired 6/6 and 12/12 elsewhere in this session, including with the acting window
+being ours and the pre-action foreground being a third window's -- which is also the state every
+WinForms round was in (foreground held by Calculator's frame throughout, before and after).
+The detector is therefore transferred rather than re-verified on this window class, and a
+residual possibility remains that a raise produced specifically by a WinForms message would go
+undetected. It is small, it is not proven away, and the verdict does not rest on it alone: the
+30% coverage figure and the pattern-absence result are independent of it.
+
 ## Verdict against the plan's own G0 criterion
+
 
 The checklist says: 覆盖率预估 → 成本收益判断, and *if the conclusion is "only a minority of
 scenarios can run in parallel" → 判死, record under RM-3.* The measured answer is 30% of
