@@ -33,7 +33,21 @@ param(
   # so rounds 2-8 silently measured "act on a FOREGROUND app" under a header claiming
   # background. Only the owning process may re-activate (the foreground lock refuses
   # outsiders), so the request has to be delivered to the owner through a file it polls.
-  [string]$ReGrabFile = ''
+  [string]$ReGrabFile = '',
+  # App-side state oracle, written every tick: the live .NET control text, read by the only
+  # code that can read it truthfully.
+  #
+  # WHY THIS IS NECESSARY AND NOT REDUNDANT. Cross-process, GetWindowText on a control owned
+  # by another process is documented as not supported, and an experiment found exactly that
+  # shape: WM_CHAR and WM_SETTEXT all returned ret=1 -- success by the API's own answer --
+  # while WM_GETTEXT kept reporting the original 'abc'. In-process, the same writes worked
+  # perfectly. So the driver could not tell "the message was silently refused" from "the
+  # message landed and my read is blind", and those two findings imply OPPOSITE things for the
+  # project: the first means the message door does not exist cross-process (R2 dies), the
+  # second means it works and this instrument was measuring its own blindness. Reading the
+  # text from inside the app settles it, and it is the same lesson the Chromium experiment
+  # already taught: an effect oracle must never be the acted-upon element's own read path.
+  [string]$StateFile = ''
 )
 $ErrorActionPreference = 'Stop'
 # WinForms' UIA providers are behind AppContext switches, and powershell.exe runs with
@@ -87,6 +101,13 @@ $timer.Interval = 400
 $started = (Get-Date)
 $timer.Add_Tick({
   if ($ExitFile -and (Test-Path -LiteralPath $ExitFile)) { $form.Close() }
+  if ($StateFile) {
+    # The oracle reads the .NET objects, never WM_GETTEXT: if both sides used the same read
+    # path, agreeing would prove nothing.
+    try {
+      Set-Content -LiteralPath $StateFile -Value ($edit.Text + "`t" + $edit2.Text) -Force -ErrorAction Stop
+    } catch { }
+  }
   if (((Get-Date) - $started).TotalMilliseconds -gt $HoldMs) { $form.Close() }
   # Self-activation on the owning process's own UI thread. A driver script cannot do this
   # for us: the foreground lock refuses SetForegroundWindow from a process that owns
