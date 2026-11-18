@@ -71,7 +71,26 @@ $timer.Add_Tick({
 })
 $timer.Start()
 
+# A process launched with STARTUPINFO SW_HIDE -- which is what node's windowsHide:true and
+# PowerShell's -WindowStyle Hidden both do -- creates its first window already hidden: the
+# window exists but EnumWindows never lists it, and every driver waiting on the target
+# concludes "launch failed". SW_SHOWNA restores visibility WITHOUT activation, which is
+# also why showing the window does not steal the foreground.
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class WinShow {
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  public static string Unactivate(IntPtr h) {
+    ShowWindow(h, 8);              // SW_SHOWNA
+    return h.ToInt64() + " visible=" + IsWindowVisible(h);
+  }
+}
+'@
+
 $form.Add_Shown({
+  try { [void][WinShow]::Unactivate($form.Handle) } catch { }
   # Print our own hwnd so the driver never has to guess which window appeared.
   Write-Output ("HWND=" + $form.Handle.ToInt64())
 })

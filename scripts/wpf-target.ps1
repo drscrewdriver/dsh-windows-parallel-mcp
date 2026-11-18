@@ -48,7 +48,16 @@ $timer.Add_Tick({
 $timer.Start()
 
 $window.Add_ContentRendered({
-  Write-Output ("HWND=" + (New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle.ToInt64())
+  # Same trap as winforms-target.ps1: under a process launched with STARTUPINFO SW_HIDE
+  # the WPF window is created hidden, so EnumWindows never lists it and every driver
+  # waiting on the target reads that as a launch failure. SW_SHOWNA restores visibility
+  # without activation, so showing the window cannot be mistaken for stealing focus.
+  try {
+    Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class WinShowWpf{[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int cmd);}'
+    $h = (New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle
+    [void][WinShowWpf]::ShowWindow($h, 8)
+    Write-Output ("HWND=" + $h.ToInt64())
+  } catch { }
 })
 
 # Application.Run is an INSTANCE method: `[Windows.Application]::Run(...)` fails to bind.
