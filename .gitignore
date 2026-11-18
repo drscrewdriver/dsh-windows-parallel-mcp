@@ -1,6 +1,7 @@
 node_modules/
-lib/*.js.map
+lib/
 .tmp/
-*.err
-.proof/
-dist/
+*.log
+proof/
+targets.json
+resident.log

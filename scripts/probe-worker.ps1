@@ -88,6 +88,17 @@ function Emit([string]$line) {
 }
 
 $next = 0
+# Boot marker + self-reported pid: Start-Process hands back a pid, but under a host that
+# reaps process trees (CI harness / job objects) the launcher's number is not always the
+# process still writing when the caller comes back. The worker reports its OWN pid, and
+# that is what --stop must match. Without it, "no samples" and "sampler was reaped" look
+# identical -- and the second one quietly invalidates a zero-motion result.
+if ($Out) {
+  try {
+    Set-Content -LiteralPath ($Out + '.boot') -Value (Get-Date).ToUniversalTime().ToString('o') -NoNewline
+    Set-Content -LiteralPath ($Out + '.self') -Value ([System.Diagnostics.Process]::GetCurrentProcess().Id) -NoNewline
+  } catch { }
+}
 try {
   while ($sw.ElapsedMilliseconds -lt $deadline) {
     $ts = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
@@ -98,6 +109,10 @@ try {
     if ($StopFile -and (Test-Path -LiteralPath $StopFile)) { break }
   }
 } finally {
+  # Shutdown marker in the record itself: the stop handshake completes on evidence from
+  # the file that a proof run reads, not on a pid that a host may re-parent or reap.
+  try {
+    Emit ('#done ' + ([System.Diagnostics.Process]::GetCurrentProcess().Id) + ' ' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
+  } catch { }
   $outStream.Flush(); $outStream.Dispose()
-  if (-not $Out) { try { [GC]::Collect() } catch {} }
 }

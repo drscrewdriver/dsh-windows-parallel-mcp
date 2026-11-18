@@ -19,8 +19,8 @@
 //   node src/lib/proof-probe.mjs --move 300 --ms 3000              self-check: does it see motion
 //
 // Records: ~/.dsh/windows-parallel-mcp/proof/probe-<ts>.jsonl  (+ .err, live.json, stop)
-import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, openSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, openSync, closeSync, readSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,21 +47,96 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-function pidAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+// Liveness is decided by the RECORD, not by a pid handle: under a host that reaps or
+// re-parents process trees (CI harness, job objects), the pid Start-Process reported can
+// stop being queryable while the sampler is still writing -- which would read as "dead"
+// and would make a zero-motion result meaningless. So there is no pidAlive() here on
+// purpose: a stale process handle is not evidence about the record.
+function samplerState(live) {
+  if (!live) return { state: 'none' };
+  if (!existsSync(live.out)) return { state: 'booting', since: Date.now() - live.startedAt };
+  const st = statSync(live.out);
+  // Bytes only, never a re-read of the file: --status may be called while a proof run is
+  // in progress, and scanning megabytes per poll burns CPU in the very window whose
+  // quietness is under test. ~150 bytes per record.
+  if (tailHasDone(live.out)) return { state: 'done', bytes: st.size };
+  const age = Date.now() - st.mtimeMs;
+  return { state: age < 3000 ? 'running' : 'stale', ageMs: Math.round(age), bytes: st.size };
+}
+
+function countRows(txt) {
+  let n = 0;
+  for (const l of txt.split('\n')) { const t = l.trim(); if (t && !t.startsWith('#')) n++; }
+  return n;
+}
+
+function waitDone(live, ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (existsSync(live.out) && tailHasDone(live.out)) return true;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120);
+  }
+  return false;
+}
+
+// Tail-only check: a proof run can be several MB, and polling it whole would burn CPU in
+// the very window whose stillness we are measuring.
+function tailHasDone(file) {
+  try {
+    const size = statSync(file).size;
+    const n = Math.min(size, 400);
+    const fd = openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(n);
+      readSync(fd, buf, 0, n, size - n);
+      return /#done\s/.test(buf.toString('utf8'));
+    } finally { closeSync(fd); }
+  } catch { return false; }
+}
+
+function samplerArgs(hz, ms, out) {
+  return ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass',
+    '-File', WORKER, '-Hz', String(hz), '-DurationMs', String(ms), '-Out', out, '-StopFile', STOPFILE];
 }
 
 function startSampler({ hz, ms, out, background }) {
-  const psArgs = ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass',
-    '-File', WORKER, '-Hz', String(hz), '-DurationMs', String(ms), '-Out', out, '-StopFile', STOPFILE];
-  const errFd = openSync(out + '.err', 'a');
-  const child = spawn('powershell.exe', psArgs, {
-    stdio: ['ignore', 'ignore', errFd],
-    detached: background,
-    windowsHide: true,
-  });
-  child.on('error', (e) => { writeFileSync(out + '.spawnerr', String(e && e.message)); });
-  return child;
+  const args = samplerArgs(hz, ms, out);
+  if (!background) {
+    const errFd = openSync(out + '.err', 'a');
+    const child = spawn('powershell.exe', args, { stdio: ['ignore', 'ignore', errFd], windowsHide: true });
+    child.on('error', (e) => { writeFileSync(out + '.spawnerr', String(e && e.message)); });
+    return child;
+  }
+  // A background sampler must outlive the short-lived Node command that starts it.
+  // spawn(..., {detached:true}) does NOT work here: the sampler exits at once and the
+  // JSONL stays 0 bytes. Start-Process is the documented Windows way to hand a process
+  // to the session.
+  // Two traps, both hit on this host:
+  //  1. an unquoted '-NoProfile' binds to Start-Process as its own parameter, leaving
+  //     the sampler with no script at all -- so every argument gets single quotes;
+  //  2. if the sampler inherits the launcher's stdout handle, any caller that waits on
+  //     the launcher (spawnSync with a pipe) blocks until the SAMPLER exits -- which is
+  //     never, for a background run. Hence: the pid goes to a file, and the sampler's
+  //     own stdio is redirected away from the launcher's handles.
+  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+  const list = args.map(q).join(', ');
+  const errFile = out + '.err';
+  const pidFile = out + '.pid';
+  const cmd = [
+    `$p = Start-Process -FilePath powershell.exe -ArgumentList ${list}`,
+    `-WindowStyle Hidden -RedirectStandardOutput ${q(out + '.sout')} -RedirectStandardError ${q(errFile)} -PassThru;`,
+    `Set-Content -LiteralPath ${q(pidFile)} -Value $p.Id -NoNewline`,
+  ].join(' ');
+  spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', cmd], { encoding: 'utf8', windowsHide: true, stdio: 'ignore' });
+  const deadline = Date.now() + 8000;
+  while (!existsSync(pidFile) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
+  if (!existsSync(pidFile)) throw new Error('sampler launch produced no pid: ' + cmd.slice(0, 200));
+  const pid = Number(readFileSync(pidFile, 'utf8').trim());
+  if (!pid) throw new Error('sampler pid unreadable in ' + pidFile);
+  try { rmSync(pidFile, { force: true }); } catch {}
+  return { pid };
 }
 
 export function summarize(lines, { hz = 20 } = {}) {
@@ -137,6 +212,12 @@ function readLive() {
 }
 
 function report(live) {
+  if (!existsSync(live.out)) {
+    // A missing record file means the sampler never wrote anything -- which must never
+    // be read as "zero motion observed".
+    const ef = live.out + '.err';
+    return { error: 'no sampler output file', file: live.out, samplerStderr: existsSync(ef) ? readFileSync(ef, 'utf8').trim().slice(0, 500) : '', tag: live.tag };
+  }
   const s = summarize(readFileSync(live.out, 'utf8').split('\n'), { hz: live.hz });
   s.file = live.out;
   if (live.tag) s.tag = live.tag;
@@ -163,7 +244,7 @@ async function main() {
 
   if (flag('status')) {
     const live = readLive();
-    console.log(JSON.stringify({ live: !!live, sampler: live, samplerAlive: live ? pidAlive(live.pid) : false }));
+    console.log(JSON.stringify({ live: !!live, sampler: live, samplerState: samplerState(live) }));
     return 0;
   }
 
@@ -171,12 +252,14 @@ async function main() {
     const live = readLive();
     if (!live) { console.log(JSON.stringify({ error: 'no live sampler', liveFile: LIVE })); return 2; }
     writeFileSync(STOPFILE, String(Date.now()));
-    const deadline = Date.now() + 6000;
-    let gone = false;
-    while (Date.now() < deadline) { if (!pidAlive(live.pid)) { gone = true; break; } await sleep(120); }
-    if (!gone) { try { process.kill(live.pid); } catch {} await sleep(300); }
+    // The stop handshake is the `#done` record, not a pid: a reaped-but-still-writing
+    // sampler would otherwise be reported as stopped before its last samples landed.
+    const graceful = waitDone(live, 8000);
+    let killed = false;
+    if (!graceful && live.pid) { try { process.kill(live.pid); killed = true; } catch {} }
     const s = report(live);
-    s.stoppedCleanly = gone;
+    s.stoppedCleanly = graceful;
+    if (killed) s.note = 'stop-file handshake timed out; sampler signalled';
     console.log(JSON.stringify(s, null, 2));
     rmSync(STOPFILE, { force: true }); rmSync(LIVE, { force: true });
     return 0;

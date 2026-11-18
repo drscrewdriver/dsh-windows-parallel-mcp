@@ -1,0 +1,79 @@
+# winforms-target.ps1 — a known-reachable target for the reachability matrix.
+#
+# WHY THIS EXISTS: without it, a low ok-rate cannot be read. Either the channels really
+# do not reach Win11 Notepad/Explorer/Chromium, or the matrix's method is wrong, or this
+# session's UIA/environment is broken. A WinForms window has a classic Edit child window
+# and a real Button, so if the channels work there and fail elsewhere, the failure belongs
+# to the targets, not to the instrument. That is also the acceptance shape of task_18
+# ("WinForms test window can be clicked, Edit writable, focus unchanged").
+#
+# STA and hidden-but-not-minimised: a WinForms message loop needs STA for the clipboard
+# and UIA provider paths. The window is visible so UIA exposes its tree; it is positioned
+# off the working area top-left corner so it does not cover the user's screen.
+param(
+  [int]$HoldMs = 90000,
+  [string]$Title = 'WpmWinFormsTarget',
+  [string]$ExitFile = ''
+)
+$ErrorActionPreference = 'Stop'
+# WinForms' UIA providers are behind AppContext switches, and powershell.exe runs with
+# the legacy defaults -- under which every control surfaces through the MSAA bridge as a
+# bare Pane with NO patterns. That made the positive control fail, which is precisely the
+# thing a positive control is for: it told us the instrument, not the target, was broken.
+# Turning the switches off before any WinForms type is touched restores real UIA.
+foreach ($sw in 'Switch.UseLegacyAccessibilityFeatures', 'Switch.UseLegacyAccessibilityFeatures.2', 'Switch.UseLegacyAccessibilityFeatures.3', 'Switch.System.Windows.Forms.UseLegacyAccessibilityFeatures', 'Switch.System.Windows.Forms.UseLegacyAccessibilityFeatures.2', 'Switch.System.Windows.Forms.UseLegacyAccessibilityFeatures.3') {
+  try { [AppContext]::SetSwitch($sw, $false) } catch { }
+}
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+[System.Windows.Forms.Application]::EnableVisualStyles()
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = $Title
+$form.Size = New-Object System.Drawing.Size(420, 300)
+$form.StartPosition = 'Manual'
+$form.Location = New-Object System.Drawing.Point(60, 60)
+$form.Topmost = $false
+$form.ShowInTaskbar = $true
+
+$edit = New-Object System.Windows.Forms.TextBox
+$edit.Name = 'targetEdit'
+$edit.Text = 'abc'
+$edit.Location = New-Object System.Drawing.Point(20, 20)
+$edit.Size = New-Object System.Drawing.Size(360, 26)
+$form.Controls.Add($edit)
+
+$btn = New-Object System.Windows.Forms.Button
+$btn.Name = 'targetButton'
+$btn.Text = 'Press'
+$btn.Location = New-Object System.Drawing.Point(20, 60)
+$btn.Size = New-Object System.Drawing.Size(120, 32)
+$script:clicks = 0
+$btn.Add_Click({ $script:clicks++; $btn.Text = "Press($($script:clicks))" })
+$form.Controls.Add($btn)
+
+# The click counter has to be observable without a pattern: expose it as part of the
+# button's Name, which UIA reads as Current.Name. Effect verification then has something
+# real to diff instead of guessing from pixels.
+$edit2 = New-Object System.Windows.Forms.RichTextBox
+$edit2.Name = 'targetRich'
+$edit2.Text = 'rich-abc'
+$edit2.Location = New-Object System.Drawing.Point(20, 110)
+$edit2.Size = New-Object System.Drawing.Size(360, 80)
+$form.Controls.Add($edit2)
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 400
+$started = (Get-Date)
+$timer.Add_Tick({
+  if ($ExitFile -and (Test-Path -LiteralPath $ExitFile)) { $form.Close() }
+  if (((Get-Date) - $started).TotalMilliseconds -gt $HoldMs) { $form.Close() }
+})
+$timer.Start()
+
+$form.Add_Shown({
+  # Print our own hwnd so the driver never has to guess which window appeared.
+  Write-Output ("HWND=" + $form.Handle.ToInt64())
+})
+
+[System.Windows.Forms.Application]::Run($form)
