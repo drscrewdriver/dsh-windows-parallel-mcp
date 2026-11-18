@@ -125,13 +125,23 @@ $actW.AutoFlush = $true
 
 # ---------------------------------------------------------------------------------
 # targets this script owns, one per toolkit generation
-function Wait-Title([scriptblock]$m, [int]$sec) {
-  $d = (Get-Date).AddSeconds($sec)
-  while ((Get-Date) -lt $d) {
-    foreach ($p in Get-Process | Where-Object { $_.MainWindowHandle -ne 0 }) {
-      try { if (& $m $p) { return $p } } catch { }
+function Wait-WindowTitle([string]$marker, [int]$sec) {
+  # EnumWindows through find-window.ps1, NOT Get-Process MainWindowTitle: a UWP app's
+  # frame window belongs to ApplicationFrameHost, so the app process reports no main
+  # window and the Calculator target silently vanished from the first experiment. For a
+  # process launched with SW_HIDE the form is created hidden too, so the same lookup is
+  # the only one that works for both cases.
+  $deadline = (Get-Date).AddSeconds($sec)
+  while ((Get-Date) -lt $deadline) {
+    $out = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `
+      (Join-Path $PSScriptRoot 'find-window.ps1') -TitlePart $marker 2>$null
+    if ($out) {
+      try {
+        $j = ($out | Select-Object -Last 1) | ConvertFrom-Json
+        return @{ MainWindowHandle = [long]$j.hwnd; MainWindowTitle = $j.title; Id = [int]$j.procId }
+      } catch { }
     }
-    Start-Sleep -Milliseconds 300
+    Start-Sleep -Milliseconds 400
   }
   return $null
 }
@@ -144,7 +154,7 @@ $wfExit = Join-Path $env:TEMP ('wpm-nf-' + [guid]::NewGuid().ToString('N') + '.s
 $wfProc = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA',
   '-File', (Join-Path $PSScriptRoot 'winforms-target.ps1'), '-HoldMs', '300000', '-ExitFile', "`"$wfExit`"" -PassThru
 $made += @{ kind = 'process'; id = $wfProc.Id; file = $wfExit }
-$w = Wait-Title { param($p) $p.MainWindowTitle -like '*WpmWinFormsTarget*' } 20
+$w = Wait-WindowTitle "WpmWinFormsTarget" 30
 if ($w) {
   $targets += @{ id = 'winforms'; hwnd = [IntPtr]$w.MainWindowHandle; generation = 'win32' }
 }
@@ -155,19 +165,22 @@ $wpfExit = Join-Path $env:TEMP ('wpm-nw-' + [guid]::NewGuid().ToString('N') + '.
 $wpfProc = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA',
   '-File', (Join-Path $PSScriptRoot 'wpf-target.ps1'), '-HoldMs', '300000', '-ExitFile', "`"$wpfExit`"" -PassThru
 $made += @{ kind = 'process'; id = $wpfProc.Id; file = $wpfExit }
-$w2 = Wait-Title { param($p) $p.MainWindowTitle -like '*WpmWpfTarget*' } 20
+$w2 = Wait-WindowTitle "WpmWpfTarget" 30
 if ($w2) { $targets += @{ id = 'wpf'; hwnd = [IntPtr]$w2.MainWindowHandle; generation = 'wpf' } }
 
 # (c) Chromium: a data: URL we author, one <input> on the page
 $edgeUrl = 'data:text/html,<title>WpmNeutr</title><body style="font:16px sans-serif"><h3>neutrality</h3><input id=k value=abc style="width:320px;font-size:22px">'
 Start-Process msedge -ArgumentList @('--new-window', '--no-first-run', "`"$edgeUrl`"") | Out-Null
-$w3 = Wait-Title { param($p) $p.MainWindowTitle -like '*WpmNeutr*' } 30
+$w3 = Wait-WindowTitle "WpmNeutr" 35
 if ($w3) { $targets += @{ id = 'chromium'; hwnd = [IntPtr]$w3.MainWindowHandle; generation = 'chromium' } }
 
-# (d) WinUI/XAML system app: Calculator. State is a number, so no document can be harmed.
+# (d) UWP-framed XAML system app: Calculator. The census shows uap-framed is the largest
+#     family on this desktop (20 of 46 windows), so leaving it untested would leave the
+#     verdict unproven exactly where it counts. Its state is a number: nothing to damage.
 Start-Process 'calculator:' | Out-Null
-$w4 = Wait-Title { param($p) $p.MainWindowTitle -match '计算器|Calculator' } 25
-if ($w4) { $targets += @{ id = 'winui-calc'; hwnd = [IntPtr]$w4.MainWindowHandle; generation = 'winui' } }
+$w4 = Wait-WindowTitle "Calculator" 30
+if (-not $w4) { $w4 = Wait-WindowTitle ([char]0x8BA1 + [char]0x7B97 + [char]0x5668) 20 }
+if ($w4) { $targets += @{ id = 'winui-calc'; hwnd = [IntPtr]$w4.MainWindowHandle; generation = 'uap-framed' } }
 
 if ($targets.Count -lt 3) {
   $actW.Dispose()
@@ -176,6 +189,64 @@ if ($targets.Count -lt 3) {
 
 # ---------------------------------------------------------------------------------
 # action recorder
+
+function Test-Destructive($el) {
+  # True when invoking this control could destroy something the user cares about: closing
+  # a tab or window, quitting, deleting. The first post-filter run picked Chromium's
+  # 关闭标签页 (close tab) as "the first clickable element", which is an effect we must not
+  # produce -- and had it been a browser window with the user's tabs in it, this experiment
+  # would have destroyed real work. An instrument that can click anything will click the
+  # first thing the tree offers, so the restriction belongs in the instrument.
+  try {
+    $nm = [string]$el.Current.Name
+    if (-not $nm) { return $false }
+    # 'Clear' is deliberately NOT in this list: on Calculator it means "clear the display",
+    # which is a reversible keystroke-equivalent, and excluding it would remove the only
+    # clickable controls on the desktop's largest family. The vocabulary here is about
+    # destroying state the user could not trivially restore.
+    foreach ($w in '关闭', '退出', '删除', '移除', '放弃', '注销', '关机', '结束任务',
+                    'Close', 'Quit', 'Exit', 'Delete', 'Remove', 'Discard', 'Sign out',
+                    'Shut down', 'End task', 'Force quit') {
+      if ($nm.IndexOf($w, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+    }
+  } catch { }
+  return $false
+}
+
+function Test-WindowChrome($el) {
+  # True when the element is window DECORATION (title-bar minimize/maximize/close/restore),
+  # not an app control. Two signals, because either alone fails:
+  #  1. ancestor ClassName -- decoration BUTTONS report class 'Button', identical to real
+  #     app buttons; only their container gives them away (ApplicationFrameTitleBarWindow
+  #     on UWP frames, WindowChrome on Win32/WPF title bars).
+  #  2. name vocabulary -- the caption buttons are localized, and this desktop serves both
+  #     the Chinese and English forms.
+  # Without this filter the FIRST Invoke element found on every target was the minimise
+  # button, so each round minimized its own target. The "UIA tree empty on rounds 2-8"
+  # that drove this whole investigation was self-inflicted: an instrument destroying the
+  # state it was about to measure, and reporting the destruction as a property of the app.
+  $tw = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+  $p = $el
+  $d = 0
+  while ($p -and $d -lt 8) {
+    $cn = ''
+    try { $cn = [string]$p.Current.ClassName } catch { break }
+    foreach ($pat in 'ApplicationFrameTitleBarWindow', 'WindowChrome', 'DwmWindowWrapper', 'TitleGripper', 'NonClient') {
+      if ($cn -and $cn.IndexOf($pat, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+    }
+    try { $p = $tw.GetParent($p) } catch { break }
+    $d++
+  }
+  try {
+    $nm = [string]$el.Current.Name
+    if ($nm) {
+      foreach ($w in '最小化', '最大化', '还原', '窗口菜单', 'Minimize', 'Maximize', 'Restore', 'Window Menu') {
+        if ($nm.IndexOf($w, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+      }
+    }
+  } catch { }
+  return $false
+}
 function Rec([string]$action, [string]$target, [string]$op, [long]$t0, [long]$t1, [string]$f0, [string]$f1, [string]$outcome, [string]$why, [string[]]$own) {
   $moved = ($f0 -ne $f1)
   $after = ($f1 -split '/')[1]
@@ -225,41 +296,95 @@ try {
       # focus movement appears here is environmental and defines the noise floor the write
       # channels have to beat.
       $c0 = [N]::Now(); $cf0 = [N]::Focus()
-      $ve = @(); $ie = @()
+      $ve = @(); $ie = @(); $rawVe = 0; $rawIe = 0; $skipped = 0
       try {
         $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
         for ($i = 0; $i -lt [Math]::Min($all.Count, 120); $i++) {
-          try { if ($all[$i].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)) { $ve += $all[$i] } } catch { }
-          try { if ($all[$i].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)) { $ie += $all[$i] } } catch { }
+          $hasV = $false; $hasI = $false
+          try { if ($all[$i].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)) { $hasV = $true } } catch { }
+          try { if ($all[$i].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)) { $hasI = $true } } catch { }
+          if ($hasV) { $rawVe++ }
+          if ($hasI) { $rawIe++ }
+          if (-not ($hasV -or $hasI)) { continue }
+          # Window CHROME and DESTRUCTIVE controls are both excluded. Without the first,
+          # every target's first Invoke element was the title-bar minimise button and each
+          # round minimized its own target -- the instrument destroying the state it was
+          # about to measure, then reporting that as a property of the app. Without the
+          # second, the replacement pick was Chromium's 关闭标签页 (close tab): an effect
+          # this experiment must never produce on a browser the user might have tabs in.
+          # Raw counts stay in the record so a filtered zero can never be read as "the app
+          # exposes nothing".
+          if (Test-WindowChrome $all[$i]) { $skipped++; continue }
+          if (Test-Destructive $all[$i]) { $skipped++; continue }
+          if ($hasV) { $ve += $all[$i] }
+          if ($hasI) { $ie += $all[$i] }
         }
       } catch { }
-      $c1 = [N]::Now(); $report += Rec 'read-enumerate' $t.id 'control' $c0 $c1 $cf0 ([N]::Focus()) 'ok' "valueEls=$($ve.Count) invokeEls=$($ie.Count)" $own
+      $c1 = [N]::Now()
+      $report += Rec 'read-enumerate' $t.id 'control' $c0 $c1 $cf0 ([N]::Focus()) 'ok' "valueEls=$($ve.Count) invokeEls=$($ie.Count) rawValueEls=$rawVe rawInvokeEls=$rawIe chromeOrUnsafeSkipped=$skipped" $own
 
       # CHANNEL 1: UIA SetValue
-      if ($ve.Count) {
+      # The pick is the first WRITABLE ValuePattern element, not simply the first one:
+      # once window chrome was filtered out, the first remaining candidate on Chromium was
+      # a read-only field, so the channel that had measured 8/8 ok in the earlier run would
+      # have been scored 'refused' for a reason that has nothing to do with focus neutrality.
+      $wve = @()
+      foreach ($e in $ve) {
+        # "cannot read IsReadOnly" must NOT be treated as read-only: that would silently
+        # drop a writable control and score a focus-neutral channel as unreachable, which
+        # is the exact direction an instrument is allowed to be wrong in -- it would make
+        # the coverage number smaller and still look like evidence. SetValue itself is the
+        # authority; an unreadable flag is reported and the attempt is still made.
+        $ro = $false
+        try { $ro = [bool]$e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.IsReadOnly } catch { $ro = $false }
+        if (-not $ro) { $wve += $e }
+      }
+      if ($wve.Count) {
         $vp = $null
-        try { $vp = $ve[0].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch { }
-        if ($vp -and -not $vp.Current.IsReadOnly) {
-          $before = $vp.Current.Value
+        try { $vp = $wve[0].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch { }
+        if (-not $vp) {
+          $report += Rec 'uia-setvalue' $t.id 'write' ([N]::Now()) ([N]::Now()) ([N]::Focus()) ([N]::Focus()) 'refused' 'ValuePattern vanished between selection and use' $own
+        } else {
+          # Exactly ONE row per action. The first draft recorded 'refused' inside the catch
+          # and then fell through to the effect row, so an exception scored the same action
+          # twice -- inflating n for the channel and, worse, pairing a refusal with a
+          # fabricated 'no-effect' reading of a value that was never written.
+          $before = $null
+          try { $before = $vp.Current.Value } catch { }
           $t0 = [N]::Now(); $f0 = [N]::Focus()
-          try { $vp.SetValue([string]$before + 'Q') } catch {
-            $report += Rec 'uia-setvalue' $t.id 'write' $t0 ([N]::Now()) $f0 ([N]::Focus()) 'refused' "exception: $($_.Exception.Message.Substring(0,[Math]::Min(90,$_.Exception.Message.Length)))" $own
-          }
+          $err = $null
+          try { $vp.SetValue([string]$before + 'Q') } catch { $err = $_.Exception.Message }
           Start-Sleep -Milliseconds 120
           $t1 = [N]::Now(); $f1 = [N]::Focus()
           $after = $null; try { $after = $vp.Current.Value } catch { }
-          $eff = ($null -ne $after -and $after -ne $before)
-          $report += Rec 'uia-setvalue' $t.id 'write' $t0 $t1 $f0 $f1 $(if ($eff) { 'ok' } else { 'no-effect' }) "value '$before' -> '$after'" $own
+          if ($err) {
+            $short = if ($err.Length -gt 90) { $err.Substring(0, 90) } else { $err }
+            $report += Rec 'uia-setvalue' $t.id 'write' $t0 $t1 $f0 $f1 'refused' "exception: $short" $own
+          } else {
+            $eff = ($null -ne $after -and $after -ne $before)
+            $report += Rec 'uia-setvalue' $t.id 'write' $t0 $t1 $f0 $f1 $(if ($eff) { 'ok' } else { 'no-effect' }) "value '$before' -> '$after'" $own
+          }
           try { $vp.SetValue([string]$before) } catch { }
-        } else {
-          $report += Rec 'uia-setvalue' $t.id 'write' ([N]::Now()) ([N]::Now()) ([N]::Focus()) ([N]::Focus()) 'refused' 'read-only or unreadable ValuePattern' $own
         }
       } else {
-        $report += Rec 'uia-setvalue' $t.id 'write' ([N]::Now()) ([N]::Now()) ([N]::Focus()) ([N]::Focus()) 'absent' 'no ValuePattern element' $own
+        # 'absent' and 'skipped' are DIFFERENT verdicts for the coverage claim: absent means
+        # the app exposes no such pattern, skipped means it exposes one that our safety
+        # filter refused to touch (chrome, or a destructive control). Collapsing them would
+        # turn "we declined" into "Windows cannot", which is the direction an honest
+        # coverage number must not be wrong in.
+        $whySv = if ($rawVe -gt 0) { "no USABLE ValuePattern element (raw=$rawVe, all chrome or read-only)" } else { 'no ValuePattern element' }
+        $report += Rec 'uia-setvalue' $t.id 'write' ([N]::Now()) ([N]::Now()) ([N]::Focus()) ([N]::Focus()) $(if ($rawVe -gt 0) { 'skipped' } else { 'absent' }) $whySv $own
       }
 
-      # CHANNEL 2: WM_CHAR into a child window of an input class
-      $editLine = @([N]::ChildInfo($t.hwnd)) | Where-Object { $_ -match ':(Edit|RichEdit|RICHEDIT50W|Chrome_RenderWidgetHostHWND)$' } | Select-Object -First 1
+      # CHANNEL 2: WM_CHAR into a child window of an input class.
+      # The match is a substring test on the class, NOT an anchored suffix: WinForms names
+      # its edit windows `WindowsForms10.EDIT.app.0.<hash>_r<n>_ad<n>`, so /:(Edit)$//
+      # never matched one -- the one channel that should be focus-neutral reported
+      # 'absent' on the single target that actually has that window class.
+      $editLine = @([N]::ChildInfo($t.hwnd)) | Where-Object {
+        $c = [string](($_ -split ':')[1])
+        $c -and ($c -match '(?i)edit' -or $c -match 'Chrome_RenderWidgetHostHWND' -or $c -match '(?i)xaml_window')
+      } | Select-Object -First 1
       if ($editLine) {
         $eh = [IntPtr]([int64](($editLine -split ':')[0]))
         $cls = ($editLine -split ':')[1]

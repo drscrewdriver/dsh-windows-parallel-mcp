@@ -13,7 +13,14 @@
 param(
   [int]$HoldMs = 90000,
   [string]$Title = 'WpmWinFormsTarget',
-  [string]$ExitFile = ''
+  [string]$ExitFile = '',
+  # After this many milliseconds the form takes the foreground ITSELF. It must be the
+  # owning process that calls SetForegroundWindow: the foreground lock refuses the call
+  # from any other process, so a driver script trying to background a target by activating
+  # a window it does not own silently does nothing -- which is how the background-state
+  # experiment reported a "background" reading for a window that was still foreground.
+  # -1 disables.
+  [int]$GrabFgAfterMs = -1
 )
 $ErrorActionPreference = 'Stop'
 # WinForms' UIA providers are behind AppContext switches, and powershell.exe runs with
@@ -68,6 +75,14 @@ $started = (Get-Date)
 $timer.Add_Tick({
   if ($ExitFile -and (Test-Path -LiteralPath $ExitFile)) { $form.Close() }
   if (((Get-Date) - $started).TotalMilliseconds -gt $HoldMs) { $form.Close() }
+  # Self-activation on the owning process's own UI thread. A driver script cannot do this
+  # for us: the foreground lock refuses SetForegroundWindow from a process that owns
+  # neither the current foreground window nor the last input event.
+  if ($GrabFgAfterMs -ge 0 -and -not $script:grabTried -and
+      ((Get-Date) - $started).TotalMilliseconds -ge $GrabFgAfterMs) {
+    $script:grabTried = $true
+    try { $ok = [WinShow]::Grab($form.Handle); Write-Output ("GRAB=" + $ok) } catch { Write-Output ("GRAB=error " + $_.Exception.Message) }
+  }
 })
 $timer.Start()
 
@@ -82,12 +97,24 @@ using System.Runtime.InteropServices;
 public static class WinShow {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   public static string Unactivate(IntPtr h) {
     ShowWindow(h, 8);              // SW_SHOWNA
     return h.ToInt64() + " visible=" + IsWindowVisible(h);
   }
+  // Called from THIS process, which owns the window -- the only caller the foreground
+  // lock will accept for an activation.
+  public static bool Grab(IntPtr h) {
+    ShowWindow(h, 5);              // SW_SHOW
+    SetForegroundWindow(h);
+    return GetForegroundWindow() == h;
+  }
 }
 '@
+
+$grabbedAt = -1
+$grabTried = $false
 
 $form.Add_Shown({
   try { [void][WinShow]::Unactivate($form.Handle) } catch { }
