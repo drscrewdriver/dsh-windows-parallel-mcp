@@ -1,4 +1,4 @@
-# wpf-target.ps1 — UIA-native positive control for the neutrality experiment.
+﻿# wpf-target.ps1 — UIA-native positive control for the neutrality experiment.
 #
 # WHY A SECOND CONTROL. WinForms under PS 5.1 surfaces its controls through the MSAA bridge
 # as pattern-less Panes even with the legacy-accessibility AppContext switches off, so a

@@ -1,4 +1,4 @@
-# close-probe-tabs.ps1 — close only the Notepad tabs this session's probes created.
+﻿# close-probe-tabs.ps1 — close only the Notepad tabs this session's probes created.
 # Matches on the tab's own title text (the probe typed a known string, or opened a known
 # temp filename), so it can never select a tab belonging to the user.
 $ErrorActionPreference = 'Continue'

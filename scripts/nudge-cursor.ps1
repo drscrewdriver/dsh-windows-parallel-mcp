@@ -1,4 +1,4 @@
-# nudge-cursor.ps1 — instrument self-test helper for proof-probe.mjs --move.
+﻿# nudge-cursor.ps1 — instrument self-test helper for proof-probe.mjs --move.
 # Moves the SYSTEM cursor by a known delta, holds, then restores it. Exists only to
 # prove the sampler is not blind: a probe that reports 0px for a 300px nudge measures
 # nothing. Not part of the engine, and never used during a proof run.

@@ -1,4 +1,4 @@
-# focus-neutrality.ps1 — per-action focus and cursor attribution (P0 verdict evidence).
+﻿# focus-neutrality.ps1 — per-action focus and cursor attribution (P0 verdict evidence).
 #
 # WHAT DECIDES THE PROJECT. R2 promises the agent works in its own windows while the human
 # keeps the keyboard and mouse. R2.3 makes that checkable: zero real-cursor movement, zero

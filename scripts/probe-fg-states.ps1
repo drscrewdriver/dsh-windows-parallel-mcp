@@ -1,4 +1,4 @@
-# probe-fg-states.ps1 — what window states can this session actually reach?
+﻿# probe-fg-states.ps1 — what window states can this session actually reach?
 #
 # Purpose: the background-enumeration test needs a target that is VISIBLE but NOT
 # FOREGROUND. Choosing how to produce that state is a Win32 question, and the answer is

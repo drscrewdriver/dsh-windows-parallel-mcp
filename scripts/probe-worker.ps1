@@ -1,4 +1,4 @@
-# probe-worker.ps1 — raw Win32 input-state sampler for the parallel proof (P0 / task_2).
+﻿# probe-worker.ps1 — raw Win32 input-state sampler for the parallel proof (P0 / task_2).
 # Emits one JSONL line per sample (to stdout, and appended to -Out when given).
 # Read-only: no SendInput, no SetForegroundWindow, no cursor write. Anything that could
 # move or grab something is deliberately absent, because the sampler itself must not

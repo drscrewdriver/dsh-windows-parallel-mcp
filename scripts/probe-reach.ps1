@@ -1,4 +1,4 @@
-# probe-reach.ps1 — injection-channel reachability matrix (P0 / task_4).
+﻿# probe-reach.ps1 — injection-channel reachability matrix (P0 / task_4).
 #
 # WHY THIS EXISTS: the parallel claim (R2) only survives if hwnd-directed channels land
 # on real targets. UIA patterns and PostMessage are best-effort by design: Chromium

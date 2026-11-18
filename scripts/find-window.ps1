@@ -1,4 +1,4 @@
-# find-window.ps1 — locate a top-level window by title substring, via EnumWindows.
+﻿# find-window.ps1 — locate a top-level window by title substring, via EnumWindows.
 #
 # Why not Get-Process MainWindowTitle: when the owning process was started with its
 # console hidden, MainWindowHandle can resolve to the console rather than the form, and

@@ -1,4 +1,4 @@
-# toolkit-census.ps1 — read-only census of the visible desktop, by toolkit family.
+﻿# toolkit-census.ps1 — read-only census of the visible desktop, by toolkit family.
 #
 # WHY THIS IS THE LAST P0 NUMBER. The gate asks whether measured coverage supports the
 # product claim. The neutrality experiment answers "which channels are focus-neutral on

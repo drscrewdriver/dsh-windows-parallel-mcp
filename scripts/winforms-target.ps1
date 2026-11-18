@@ -1,4 +1,4 @@
-# winforms-target.ps1 — a known-reachable target for the reachability matrix.
+﻿# winforms-target.ps1 — a known-reachable target for the reachability matrix.
 #
 # WHY THIS EXISTS: without it, a low ok-rate cannot be read. Either the channels really
 # do not reach Win11 Notepad/Explorer/Chromium, or the matrix's method is wrong, or this

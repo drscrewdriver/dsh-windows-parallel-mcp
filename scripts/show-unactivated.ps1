@@ -1,4 +1,4 @@
-# show-unactivated.ps1 — make a window visible without activating it.
+﻿# show-unactivated.ps1 — make a window visible without activating it.
 #
 # WHY THIS IS NEEDED. A GUI process started with STARTUPINFO.wShowWindow = SW_HIDE --
 # which is what node's `windowsHide: true` and PowerShell's `-WindowStyle Hidden` both do

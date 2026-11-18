@@ -1,4 +1,4 @@
-# inspect-run.ps1 — launch the WinForms positive control and dump its real UIA tree.
+﻿# inspect-run.ps1 — launch the WinForms positive control and dump its real UIA tree.
 # Used to fix the matrix's element/pattern selection after the positive control failed:
 # a control that is present but not found by the query is a bug in the query.
 param([int]$HoldMs = 40000)

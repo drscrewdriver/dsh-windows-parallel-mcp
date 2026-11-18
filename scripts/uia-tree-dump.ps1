@@ -1,4 +1,4 @@
-# uia-tree-dump.ps1 — read-only UIA subtree dump for one window.
+﻿# uia-tree-dump.ps1 — read-only UIA subtree dump for one window.
 #
 # WHY. When a channel reports "no ValuePattern element" there are two very different
 # causes, and the coverage verdict depends on telling them apart:

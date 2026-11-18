@@ -1,4 +1,4 @@
-# close-own-windows.ps1 — close ONLY windows this session's probes created.
+﻿# close-own-windows.ps1 — close ONLY windows this session's probes created.
 #
 # These linger because the shell wrapper kills a command's process tree on exit, so a
 # script's own cleanup step never runs when it is interrupted mid-way. Left open, they

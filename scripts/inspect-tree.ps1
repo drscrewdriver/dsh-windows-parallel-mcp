@@ -1,4 +1,4 @@
-# inspect-tree.ps1 — dump the UIA subtree of a recorded target (diagnostic aid).
+﻿# inspect-tree.ps1 — dump the UIA subtree of a recorded target (diagnostic aid).
 # Used to design the reach matrix honestly: which control types exist, which patterns
 # they support, what their values read as, and what their rects look like in UIA units
 # versus the native child-window rects. Read-only; injects nothing.

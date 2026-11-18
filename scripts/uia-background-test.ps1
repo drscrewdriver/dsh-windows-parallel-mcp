@@ -1,4 +1,4 @@
-# uia-background-test.ps1 — can UIA read a window that is NOT in the foreground?
+﻿# uia-background-test.ps1 — can UIA read a window that is NOT in the foreground?
 #
 # WHY THIS IS THE DECISIVE P0 EXPERIMENT. The neutrality run found 35 Invoke buttons in
 # Calculator on round 1 and zero on rounds 2-8. The only thing that changed is that
