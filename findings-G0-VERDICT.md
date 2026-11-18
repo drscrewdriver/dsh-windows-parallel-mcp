@@ -59,7 +59,108 @@ correct and nearly useless, and the honest move is to ship the refusal, not a sl
 of the same disturbance. This is the coverage measurement, and it is what P0 task_6 must
 produce before P2 starts.
 
+## The coverage number, measured (neutral-coverage-census.ps1)
+
+A neutral channel needs a window ADDRESS. Measured on this desktop as it stands, read-only,
+57 live titled top-level windows after excluding 5 DWM-cloaked ones (9 of the 57 minimized):
+
+```
+family                   windows   w/door     iconic clickables writables     door%
+uap-framed                    30        0          2         0         0        0%
+winui-notepad                 11       11          1         0        11      100%
+electron/chromium-app          7        0          2         0         0        0%
+win32-shell                    3        3          3         9         0      100%
+other:Zed::Window, qt, CEF-OSC-WIDGET, EVERYTHING, Progman, TaskManager  (6 windows, 3 with doors)
+
+WINDOW-LEVEL: 17 of 57 live windows have at least one classic child HWND a message could address (30%)
+```
+
+The two largest families -- UWP-framed (30 windows) and Chromium/Electron (7) -- have **zero**
+message doors. By app rather than by window, the doors belong to Notepad, the Explorer shell,
+and a few classic utilities.
+
+The UIA side is worse, and the way it is worse is the finding:
+
+```
+POSITIVE CONTROL (our own WinForms window, a child HWND known to exist):
+  UIA descendants=3 carrying an HWND=3   => the property read WORKS in this process
+sampled windows: 12   UIA actionable elements: 173   of which carrying an HWND: 0
+ACTIONABLE-ELEMENT door ratio (UIA side): 0%
+```
+
+The control had to come first: "0% of actionable elements anywhere are addressable" is the
+strongest claim in this file and therefore the least deserving of belief uncontrolled. With
+the control passing, the 0% is a fact about the desktop. But note the disagreement -- Notepad
+has 11 writable classic child windows per the Win32 tree, while its UIA elements report
+`NativeWindowHandle=0` for all 15 actionable ones. Both are true, and the consequence is a
+design cost, not a coverage win: **the engine cannot route from the element the agent chose to
+the window the message must be sent to.** It would have to walk the classic child tree and
+match by bounding rectangle and class, which makes "is this the control the user meant?" a
+positional heuristic -- and writing into the wrong child window fails silently, the same class
+of error that made an earlier experiment read the address bar instead of the page.
+
+The control also caught a filter error that would have erased the engine's only working target:
+our own WinForms TextBox/Button/RichTextBox surface as `ControlType=Pane`, not as Button/Edit,
+so a coverage figure drawn from actionable *control types* reports zero for the one family where
+the message channel demonstrably works.
+
+## Verdict against the plan's own G0 criterion
+
+The checklist says: 覆盖率预估 → 成本收益判断, and *if the conclusion is "only a minority of
+scenarios can run in parallel" → 判死, record under RM-3.* The measured answer is 30% of
+windows, concentrated in a handful of classic-tooled apps, with 0% of it discoverable through
+UIA's own element metadata. **That is the minority case, so the headline claim as written in R2
+is dead**, and continuing to P2 on the premise "drive your own windows while the user keeps
+working, generally" would be building the engine around a number this repo measured and
+rejected.
+
+What survives is narrower and still honest, and it is a different product: *for targets that
+have a message door (classic Win32, WinForms, and Notepad-family editors), drive them with zero
+cursor movement and zero foreground change -- verified 6/6 per channel against a 0/6 base rate --
+and REFUSE everything else with the reason.* Roughly a third of windows on this particular
+machine, and a well-defined minority on any Windows machine dominated by UWP/Chromium toolkits.
+Whether that narrow scope is worth building is a product decision, not a measurement, and it
+belongs to the owner of the plan rather than to the agent executing it.
+
+## G0 line 1 — external unmet complaints, verified against the live pages
+
+Each was fetched and read; state and date are from the page, not from memory. Two prior
+notes in `findings.md` were WRONG and are corrected here rather than carried forward.
+
+| # | title | state | what it actually complains about |
+|---|---|---|---|
+| 369 | PowerShell tool spawns a visible console window that steals focus (missing CREATE_NO_WINDOW) | closed, fixed via PR #397 | focus stolen + keystrokes lost while an agent session runs |
+| 419 | `switch_app()` reports success without verifying the window reached the foreground | closed, fixed via PR #430 | agent believes a focus claim and types into the wrong window |
+| 465 | indicator heartbeat stall fails open, so `USER_CONTROL` is reported with no physical input | closed, fixed via PR #535 | trigger is parallel tool calls; **direction is the inverse of focus-stealing** |
+| 332 | WatchDog UIA focus listener crashes the MCP server after long uptime | open | server death from `HandleFocusChangedEvent` spam — focus is the TRIGGER, not the harm |
+| 595 | **PR, not issue**: keep AI control until the agent releases it or the user takes over | merged | argues the 15s lease drops TOO EARLY ("49 of 131 consecutive pairs…") |
+
+Verbatim, from 369: "With an agent session running many shell calls in a row, this makes the
+machine effectively unusable for anything else."
+Verbatim, from 419: "the tool asserts the target is focused, so the agent proceeds to send
+keystrokes, and they land in whatever window actually holds focus."
+
+**CITABLE for the focus-disturbance complaint: 369 and 419** — the G0 requirement is ≥2, and
+that is exactly 2, both about the user's own input being stolen, both real.
+
+Not citable, and why: 465 and 595 are complaints about the *consent gate misfiring*, i.e. the
+engine refusing itself, which is evidence that focus contention is the axis this toolkit's
+users fight over but NOT evidence that the agent steals the desktop; 332 is a crash bug.
+**464 does not exist as a distinct complaint** (it is #465's accidental duplicate, closed as
+not planned). **`drscrewdriver/dsh-computer-use` issues #3 and #4 do not exist — the whole
+repo 404s**, and the same-named repos under other owners have unrelated #3/#4. That citation
+was in my own notes and it was fabricated; six candidate repos were checked one by one and
+none is a substitute. Deleting it is the fix, not re-attributing it.
+
+One honest reading of the two citable issues: both describe a *window the tool itself opened*
+taking the foreground (a console flash; an unverified `switch_app`), and BOTH ARE FIXED
+upstream. So the specific complaint R2 was written to answer has been answered in the shipped
+baseline, which raises rather than lowers the bar for this project: the remaining unserved
+complaint is the one in #465/#595 — a gate that cannot tell agent input from user input — and
+that is exactly what the sampler-based attribution in this repo does differently.
+
 ## Two secondary findings the run produced
+
 
 **`WM_GETTEXT` across processes is blind, and it made the matrix report a working channel as
 dead.** The message channels initially scored 0/6 "no verified effect". An in-process control
