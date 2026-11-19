@@ -18,6 +18,8 @@ const REQUIRED = [
   'lib/index.js',
   'lib/engine.js',
   'lib/host-tools.js',
+  'lib/peers-schemastery.js',
+  'lib/peers-tools.js',
   'cordis.patch.yml',
   'dsh.plugin.json',
   'src/engine/worker.ps1',

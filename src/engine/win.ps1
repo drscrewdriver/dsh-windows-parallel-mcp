@@ -75,6 +75,91 @@ public static class WpmWin
     [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LASTINPUTINFO l);
     [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
 
+    // ---- integrity level: the REAL elevated_target check -------------------------------------
+    // The old comment in Get-WpmFacts said this was deliberately unwired because "a wrong check is
+    // worse than none". That is still true, which is why the check below is the documented,
+    // side-effect-free one: OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION) -> GetTokenInformation
+    // (TokenIntegrityLevel) -> the RID's last sub-authority. No writes, no SeDebug privilege, and
+    // it degrades to -1 (unknown) on any failure -- unknown is NOT treated as elevated, because
+    // that would refuse every window the moment a handle read failed, which is the opposite wrong
+    // check. Unknown instead falls through to the door probe, and a genuinely elevated target then
+    // simply produces no effect, which the app-side verification reports as unverified.
+    [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr tok);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool GetTokenInformation(IntPtr tok, int cls, IntPtr info, uint len, out uint need);
+    [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr h);
+
+    const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    const uint TOKEN_QUERY = 0x0008;
+    const int TokenIntegrityLevel = 25;
+
+    /// <summary>Integrity RID of a pid: 0x1000 low, 0x2000 medium, 0x3000 high, 0x4000 system. -1 = unknown.</summary>
+    public static long IntegrityOf(uint pid)
+    {
+        IntPtr proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (proc == IntPtr.Zero) return -1;
+        try
+        {
+            IntPtr tok;
+            if (!OpenProcessToken(proc, TOKEN_QUERY, out tok)) return -1;
+            try
+            {
+                uint need;
+                // Two-pass: the SIZE-PROBE call is DOCUMENTED to fail -- it returns FALSE with
+                // ERROR_INSUFFICIENT_BUFFER and fills `needed`. Treating that false as a dead end
+                // made every read come back unknown on the first run of test/integrity-probe.ps1,
+                // which is exactly how a 'wrong check is worse than none' failure looks in the wild:
+                // the flag stayed false everywhere, so nothing was refused and nothing was claimed.
+                // The real condition is `needed > 0`, not the return value.
+                GetTokenInformation(tok, TokenIntegrityLevel, IntPtr.Zero, 0, out need);
+                if (need == 0) return -1;
+                IntPtr buf = Marshal.AllocHGlobal((int)need);
+                try
+                {
+                    if (!GetTokenInformation(tok, TokenIntegrityLevel, buf, need, out need)) return -1;
+                    // TOKEN_MANDATORY_LABEL { SID_AND_ATTRIBUTES Label }; Label.Sid is at offset 0.
+                    IntPtr sid = Marshal.ReadIntPtr(buf);
+                    if (sid == IntPtr.Zero) return -1;
+                    // SID layout: Revision(1) | SubAuthorityCount(1) | IdentifierAuthority(6) |
+                    // SubAuthority(4*n). The integrity RID is the LAST sub-authority.
+                    //
+                    // GetLengthSid was the first attempt and is NOT used: on this host it returns
+                    // TRUE with length 0 for a SID whose bytes read back correctly (revision 1,
+                    // count 1, authority 0x10, RID 0x2000 = medium) -- a silent contradiction that
+                    // made every read come back unknown. The length is therefore computed from the
+                    // SID's own header, which is the authoritative source anyway. Two wrong
+                    // behaviours this replaced, both discovered only by measuring: trusting the
+                    // size-probe's return value, and trusting GetLengthSid's output.
+                    int rev = Marshal.ReadByte(sid, 0);
+                    int count = Marshal.ReadByte(sid, 1);
+                    if (rev != 1 || count < 1 || count > 15) return -1;
+                    int needed = 8 + 4 * count;
+                    if (needed > (int)need) return -1;   // header claims more than the buffer holds
+                    // The integrity RID is the LAST sub-authority.
+                    return (long)BitConverter.ToUInt32(
+                        new byte[] { Marshal.ReadByte(sid, 8 + 4 * (count - 1)),
+                                     Marshal.ReadByte(sid, 9 + 4 * (count - 1)),
+                                     Marshal.ReadByte(sid, 10 + 4 * (count - 1)),
+                                     Marshal.ReadByte(sid, 11 + 4 * (count - 1)) }, 0);
+                }
+                finally { Marshal.FreeHGlobal(buf); }
+            }
+            finally { CloseHandle(tok); }
+        }
+        finally { CloseHandle(proc); }
+    }
+
+    /// <summary>Whether the target outruns us. Equal integrity is NOT elevated for our purposes.</summary>
+    public static bool IsElevatedTarget(uint pid)
+    {
+        long mine = IntegrityOf((uint)System.Diagnostics.Process.GetCurrentProcess().Id);
+        long theirs = IntegrityOf(pid);
+        if (mine < 0 || theirs < 0) return false;   // unknown never claims elevated
+        return theirs > mine;
+    }
+
     public const int SW_MINIMIZE = 6;
     public const int SW_SHOWNA = 8;
     public const int SW_RESTORE = 9;
@@ -238,11 +323,27 @@ function Get-WpmFacts {
   $kids = @([WpmWin]::Children($Hwnd))
   $childHandles = @()
   $doorKinds = @()
+  $doorHandles = @()
   foreach ($k in $kids) {
     $kh = [IntPtr]$k
     $kc = [WpmWin]::Cls($kh)
-    if ($kc -like 'Edit' -or $kc -like 'RichEdit*' -or $kc -like 'TextBox*') { $doorKinds += 'text'; $childHandles += $kh }
-    elseif ($kc -like 'Button' -or $kc -eq 'ComboBox') { $doorKinds += 'click'; $childHandles += $kh }
+    # WinForms child classes are NOT 'Edit'/'Button': they are
+    #   WindowsForms10.EDIT.app.0.<hash>_rN_adN / .BUTTON. / .RichEdit20W.
+    # and the old exact-ish match ('Edit', 'Button') never hit one of those -- the message door
+    # silently did not exist on the one toolkit where it demonstrably works, and the engine
+    # reported WinForms as `unreachable`. Found end-to-end by test/llm-action-battery.mjs; the
+    # census scripts had their own matching and never exercised this path. The base class is the
+    # segment after the `WindowsForms10.` prefix, taken before the next dot.
+    $base = $kc
+    if ($kc -like 'WindowsForms10.*') { $base = (($kc -split '\.')[1]) }
+    $kind = ''
+    if ($base -like 'Edit*' -or $base -like 'RichEdit*' -or $kc -like '*TextBox*') { $kind = 'text' }
+    elseif ($base -like 'BUTTON*' -or $base -like 'Button*' -or $kc -eq 'ComboBox') { $kind = 'click' }
+    if ($kind) {
+      $doorKinds += $kind
+      $childHandles += $kh
+      $doorHandles += @{ kind = $kind; hwnd = $kh }
+    }
   }
 
   # An element named by the caller always gets a UIA probe, even when a message door exists: the
@@ -289,22 +390,25 @@ function Get-WpmFacts {
     }
   }
 
-  # Elevated-target detection is deliberately absent rather than faked. A correct check needs a
-  # token comparison against the target process, and a WRONG check is worse than none: it would
-  # either refuse ordinary windows or bless an elevated one. So elevation is not claimed here; an
-  # elevated target simply produces no effect, which the app-side verification step reports as
-  # 'unverified' rather than as success. Writing a placeholder that always says false and then
-  # trusting it downstream is how a product ends up reporting completed actions that never ran.
+  # Elevation is now measured, not assumed. WpmWin::IsElevatedTarget compares the target's
+  # integrity RID against ours; a failure to read either side returns false rather than guessing,
+  # because guessing 'elevated' would refuse every window whose handle read failed. The flag is
+  # consumed by decide.ps1's table, which checks it BEFORE any capability -- so an elevated target
+  # is refused outright and never probed for doors it cannot answer.
+
+  $tpid = [WpmWin]::PidOf($Hwnd)
+  $elevated = [WpmWin]::IsElevatedTarget($tpid)
 
   $facts = New-WpmFacts -Hwnd ($Hwnd.ToInt64().ToString()) -Family $fam `
     -MessageDoor ($doorKinds.Count -gt 0) -HasPattern $hasPattern -PatternKind $patKind `
-    -Action $Action -FactsMeasured $true
+    -Action $Action -FactsMeasured $true -ElevatedTarget $elevated
 
   return @{
     facts = $facts
     cls = $cls
     family = $fam
     childHandles = $childHandles
+    doorHandles = $doorHandles
     doorKinds = @($doorKinds | Sort-Object -Unique)
     uiaElement = $uiaElement
     uiaErr = $uiaErr

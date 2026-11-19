@@ -167,7 +167,7 @@
       "tool": "wpm_click",
       "facts": { "hwnd": "$liveHwnd", "elevatedTarget": true },
       "expect": "elevated_target",
-      "note": "Decision-table instance only. Nothing sets this flag yet: win.ps1:292-297 states that elevation detection is deliberately absent rather than faked, and wiring it is task_52."
+      "note": "Decision-table instance. The flag is now wired (win.ps1 IsElevatedTarget, token integrity comparison) and measured live on Task Manager by test/integrity-probe.ps1; the engine-level case additionally runs in test/llm-action-battery.mjs whenever a high-integrity window exists at run time."
     },
     {
       "id": "terminal-no-door",

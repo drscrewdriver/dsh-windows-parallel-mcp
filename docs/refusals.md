@@ -31,7 +31,7 @@ R2′ 把「拒绝」当成本产品的**正常结果**（`engine.ps1` 首段注
 |---|---|---|---|---|
 | `no_hwnd` | `engine.ps1:109`（hwnd 不是活窗口）／`decide.ps1:73`（未给 hwnd） | 没有可用目标 | 先调 `wpm_windows` 拿 hwnd，再重试；不要用屏幕坐标猜 | **REAL** — `test/refusals-test.ps1` R1：`hwnd=1` 直接返回该码 |
 | `paused` | `decide.ps1:69`（`$script:WpmPaused`） | 所有者按了暂停 | 停手。这是**服务端**拒绝，不是提示层建议；不要换目标绕过 | **REAL** — R2：真实桌面上把 paused 打开，`status` 返回该码 |
-| `elevated_target` | `decide.ps1:77`（`facts.elevatedTarget`） | 目标完整性级别更高，当前进程写不进去 | 让所有者用非提权方式重开该程序；不要提权重试 | **SIMULATED** — 判定表被单测/注入覆盖，但见下方「故意未接线」 |
+| `elevated_target` | `decide.ps1:77`（`facts.elevatedTarget`）；flag 由 `win.ps1` 的 `WpmWin::IsElevatedTarget` 实测置真 | 目标完整性级别更高，当前进程写不进去 | 让所有者用非提权方式重开该程序；不要提权重试 | **REAL** — 2026-11-20 `test/integrity-probe.ps1`：桌面上任务管理器（0x3000 high）被识别，`Get-WpmFacts` → `elevatedTarget=True`，决策 `refuse/elevated_target`；其余 19 个 medium 窗零误判 |
 | `unreachable` | `decide.ps1:111`（测过：无消息门、无可用 pattern）；运行时窄路 `engine.ps1:150,159,165,185,195` | 目标没有任何可在不注入物理输入的前提下使用的门 | 换目标；或让目标暴露可寻址子窗（原生 Win32/WinForms） | **REAL** — R3：WinForms 目标按名字取控件 → 消息门被抑制、WinForms 无 pattern → 该码 |
 | `terminal_no_door` | `decide.ps1:84`（family=terminal 且两门皆无） | 终端文字面既不暴露子 HWND，也没有 Document 元素 | 换目标（浏览器地址栏/记事本等），终端不在可驱动面内 | **SIMULATED** — 判定层注入。真实终端窗实测刻意推迟，理由见下 |
 | `needs_facts` | `decide.ps1:65,107` | 调用方没给这个目标的实测事实 | 先测量再决定。**拒绝，而不是默认走安静档** | **REAL（表级）** — 引擎内不可达：`facts` 恒被测量，本码只在表被单独使用时出现 |
@@ -45,9 +45,14 @@ R2′ 把「拒绝」当成本产品的**正常结果**（`engine.ps1` 首段注
 
 ## 三个诚实的缺口（写在文档里，而不是留白）
 
-1. **`elevated_target` 今天不会被置真。** `win.ps1:292-297` 明确写了提权检测是「故意不做而不是假做」：
-   错的检测比没有检测更糟。于是 `decide.ps1:77` 是一条**已声明、未接线**的分支。接线属 task_52
-   （真实提权窗 + token 比较），在此之前不能对外宣称「能识别提权目标」。
+1. **`elevated_target` 已接线（2026-11-20，task_52 的识别半边）。** 检测是只读的 token 比较
+   （`OpenProcess(QUERY_LIMITED)` → `TokenIntegrityLevel` → 最后一个子授权 RID），读不到一律按
+   未知→不拒绝——猜「已提权」会把每个句柄读取失败的窗口都拒掉，那是反向的错检测。
+   接线过程中被实测抓出三个「静默恒 false」缺陷：size-probe 的返回值语义（文档规定该调用**必然
+   返回 FALSE**）、`GetLengthSid` 在本机返回 TRUE+len=0、SID 头未校验就索引。三者都让检查「看起来
+   在工作」而实际全部 unknown——这正是「错的检测比没有更糟」的具体形态。
+   **仍缺的**：`restore_failed` 兜底路径（提权窗 + 抬前台被 OS 拒绝的端到端）需要提权窗口在跑
+   battery 时在场；本轮 Task Manager 在场时测到了识别与拒绝，恢复兜底未触发。
 2. **`action_failed` / `restore_failed` 没有实测样例。** 表中标 NOT-COVERED，不写「已支持」。
 3. **`terminal_no_door` 只有判定层实测。** 本轮不拉真实终端窗口，是因为 `findings.md:311-316` 记录过一次
    `wt --headless` 残留 Error 弹窗事故（单实例转发 + 弹窗归属真实宿主，`Stop-Process` 够不到）。

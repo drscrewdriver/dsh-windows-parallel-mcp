@@ -98,10 +98,10 @@ goal statement did not survive it. Kept here rather than quietly dropped:
   under a construction that first took the foreground away. The flash tier is a fuse, not a promise
   of disturbance.
 
-An elevated window's restore-failure path is **wired but not yet measured on a real elevated
-target**; `elevated_target` is a declared-but-unwired detection branch (a wrong integrity check
-would be worse than none). Both are stated in [docs/refusals.md](docs/refusals.md) rather than
-claimed as supported.
+`elevated_target` is measured live: the engine compares the target's integrity RID against its own
+and refuses before acting (verified on an elevated Task Manager; 19 medium windows, zero
+misrefusals). The **restore-failure path on an elevated target** (`restore_failed`) remains
+unmeasured end-to-end and is stated as such in [docs/refusals.md](docs/refusals.md).
 
 ## License
 

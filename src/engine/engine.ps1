@@ -163,10 +163,13 @@ function Invoke-WpmAction {
   try {
     if ($decision.channel -eq 'message') {
       if ($Action -eq 'type') {
+        # The door kind is decided ONCE, in the probe (win.ps1), and consumed here by kind.
+        # This path used to re-match class names with its own copy of the pattern -- and that copy
+        # carried the same 'Edit' vs 'WindowsForms10.EDIT.*' bug, so a fix in one place would have
+        # silently left the other broken. One matcher, one truth.
         $target = $null
-        foreach ($c in $probe.childHandles) {
-          $cc = [WpmWin]::Cls($c)
-          if ($cc -like 'Edit' -or $cc -like 'RichEdit*') { $target = $c; break }
+        foreach ($d in $probe.doorHandles) {
+          if ($d.kind -eq 'text') { $target = [IntPtr]$d.hwnd; break }
         }
         if (-not $target) {
           $result.refusal = 'unreachable'; $result.reason = 'no editable child window for the message tier'

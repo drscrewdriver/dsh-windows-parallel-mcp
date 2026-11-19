@@ -18,11 +18,24 @@ dsh plugin --profile <profile> add dsh-windows-parallel-mcp
 The host adds the package to the profile's `dsh.profile.bundles`; the bundle patch
 (`cordis.patch.yml`) inserts one row (`id: windows-parallel`). Nothing else is mounted or replaced.
 
-To install from a local checkout instead:
+To install from a local build, pack first and install the tarball -- this is also how the
+profile's other local-development plugins are mounted, and it matters for more than tidiness:
 
 ```bash
-dsh plugin --profile <profile> add /path/to/dsh-windows-parallel-mcp
+npm pack --ignore-scripts                       # -> dsh-windows-parallel-mcp-0.1.0.tgz
+dsh plugin --profile <profile> add /abs/path/to/dsh-windows-parallel-mcp-0.1.0.tgz
 ```
+
+A `link:` install keeps the package's REAL path outside the profile tree, and Node resolves bare
+peer specifiers (`@deepseek-ai/schemastery`) upward from the real path -- so the peers never
+resolve, the settings form silently disappears, and the plugin falls to its shim. A `file:` tarball
+installs as a real directory inside the profile and the peers resolve exactly like every other
+plugin. This was measured, not inferred: `link:` -> `config schema: local-standard-schema-shim`,
+`file:` -> `config schema: @deepseek-ai/schemastery`.
+
+The desktop profile is managed by the Electron app; `dsh plugin --profile desktop ...` only works
+through the desktop-bundled CLI (`resources/runtime/cli/bin/dsh.cmd`), and a profile with a pinned
+lockfile should be changed surgically rather than by any command that re-resolves the whole graph.
 
 ## Verify it actually activated
 
