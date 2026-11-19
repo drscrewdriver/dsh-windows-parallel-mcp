@@ -76,6 +76,28 @@ pass = run('tool schema contract', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// The package that gets installed is the product. A missing engine file or a swept-in .tmp/ both
+// install cleanly and fail later, so the tarball is checked here rather than discovered at install.
+pass = run('package tarball contents', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-pack.mjs'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
+// The two process-level suites cost about a second each (one PowerShell start). They belong in the
+// gate because a broken protocol or a broken projection is exactly as fatal as a syntax error, and
+// because a test that only runs when someone remembers to run it is not a gate.
+pass = run('host half + sidecar (process)', () => {
+  const out = [];
+  let good = true;
+  for (const file of ['test/plugin-test.mjs', 'test/worker-smoke.mjs']) {
+    const r = spawnSync(process.execPath, [file], { encoding: 'utf8' });
+    if (r.status !== 0) good = false;
+    const tail = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(-1)[0] || '';
+    out.push(`${file}: ${tail}`);
+  }
+  return { ok: good, out: out.join('\n') };
+}) && pass;
+
 const js = [].concat(...roots.map((rt) => walk(rt, ['.mjs', '.js'])));
 const jsFail = [];
 for (const f of js) {

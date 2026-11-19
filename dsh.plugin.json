@@ -1,0 +1,18 @@
+{
+  "id": "dsh-external/dsh-windows-parallel-mcp",
+  "version": "0.1.0",
+  "main": "./lib/index.js",
+  "description": "One tool, five actions: drive a Windows window without moving the cursor or stealing the keyboard. Prefers window messages (zero foreground change); falls back to UI Automation with a bounded, self-reversing focus flash (measured net return 15-95 ms).",
+  "engines": {
+    "dsh": ">=0.1.7-0 <0.3.0-0"
+  },
+  "contributes": {
+    "tools": [
+      {
+        "name": "wpm",
+        "description": "Drive a Windows window without moving the cursor or stealing the keyboard (actions: windows, status, click, type, focus)."
+      }
+    ],
+    "skills": []
+  }
+}

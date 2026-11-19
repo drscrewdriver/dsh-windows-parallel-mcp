@@ -1,6 +1,26 @@
 {
   "schemaVersion": "0.1.0",
-  "status": "form-neutral: consumed by either delivery form (DSH native plugin sidecar or MCP server); the form is not decided yet (task_56)",
+  "status": "form decided 2026-11-19: A = DSH native plugin (no MCP). The five named tools below stay the canonical ACTION surface; the host projection (see hostProjection) exposes them as one tool with an action discriminator, which is this host's convention for a multi-action capability.",
+  "hostProjection": {
+    "form": "A",
+    "decided": "2026-11-19",
+    "why": "root cause: five resident tool schemas describing one engine is a standing per-turn token cost with no added capability; the host's own shell/terminal tools are one-tool-with-action. The action surface here is unchanged -- same five actions, same arguments, same refusal codes.",
+    "package": "dsh-windows-parallel-mcp",
+    "tool": "wpm",
+    "discriminator": "action",
+    "source": "lib/host-tools.js#PARAMETERS",
+    "actions": {
+      "wpm_windows": "windows",
+      "wpm_click": "click",
+      "wpm_type": "type",
+      "wpm_focus": "focus",
+      "wpm_status": "status"
+    },
+    "extraWorkerActions": [
+      { "action": "ping", "exposed": false, "why": "protocol/encoding self-test; not part of the tool surface" },
+      { "action": "pause", "exposed": false, "why": "owner control, behind the settings pill rather than the model's reach" }
+    ]
+  },
   "notes": [
     "The five tool names are fixed here so both delivery forms expose the same action surface.",
     "src/engine/engine.ps1 is the only implementation; this file is the contract, not a second implementation.",

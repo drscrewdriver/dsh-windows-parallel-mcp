@@ -1,0 +1,61 @@
+{
+  "name": "dsh-windows-parallel-mcp",
+  "version": "0.1.0",
+  "description": "Drive a Windows window without moving the cursor or stealing the keyboard: one tool, five actions, a channel decision table that prefers the quiet door, and a bounded self-reversing focus flash when only UI Automation can reach the control. Windows PowerShell 5.1 sidecar, zero install dependencies, no synthetic input.",
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "windows",
+    "parallel",
+    "hwnd",
+    "ui-automation",
+    "computer-use"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./dsh.plugin.json": "./dsh.plugin.json",
+    "./src/engine/*": "./src/engine/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "src/engine/",
+    "src/schema/",
+    "docs/refusals.md",
+    "cordis.patch.yml",
+    "dsh.plugin.json",
+    "INSTALL.md",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.1.7-0 <0.3.0-0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.7-0 <0.3.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/check.mjs && node test/plugin-test.mjs && node test/worker-smoke.mjs",
+    "test:decide": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/decide-test.ps1",
+    "test:refusals": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/refusals-test.ps1",
+    "prepack": "node scripts/check-pack.mjs",
+    "verify:install": "node scripts/verify-install.mjs"
+  }
+}

@@ -1,0 +1,15 @@
+# dsh-windows-parallel-mcp bundle patch.
+#
+# 形态 A（DSH 原生插件）的装配行：把本包作为一行追加进 profile 装配树，由宿主直接
+# 注册 `wpm` 工具。这里**没有 bridge row、没有 transport: stdio、没有 MCP server**——
+# 那是形态 B。所有者 2026-11-19 选了 A，见 spec.md R3.1′。
+#
+# 纯新增行，不替换任何官方 entry。唯一子进程是 PowerShell 引擎 worker，两种形态都需要它，
+# 且只在第一次工具调用时才启动（lib/engine.js 的 lazy start）。
+#
+# 出厂不写 disabled：用户装上这个包就是想要这个工具。开关在设置面（`enabled` 配置项，
+# volatile → 热生效），而不是靠装配行把它藏起来——藏起来的结果是「装了但模型看不见」，
+# 那是最难诊断的一类故障。
+- insert:
+    - id: windows-parallel
+      name: dsh-windows-parallel-mcp

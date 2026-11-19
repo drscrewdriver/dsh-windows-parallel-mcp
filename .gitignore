@@ -1,7 +1,11 @@
 node_modules/
-lib/
 .tmp/
 *.log
 proof/
 targets.json
 resident.log
+
+# `lib/` is SOURCE here, not build output: this package ships plain JavaScript with no build step,
+# which is how it keeps "clone and install" free of a toolchain. It was ignored while the package was
+# still a reservation; leaving that line in would have meant committing a plugin whose entry point
+# does not exist in the repository.

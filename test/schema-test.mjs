@@ -12,7 +12,8 @@
 // It validates the schema itself with a deliberately small JSON Schema subset (type / required /
 // additionalProperties / minimum / maximum): the point is to catch a wrong contract, not to
 // re-implement validator semantics. Exit code 1 on any problem.
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { PARAMETERS } from '../lib/host-tools.js';
 
 const schema = JSON.parse(readFileSync('src/schema/tools.json', 'utf8'));
 const problems = [];
@@ -78,6 +79,47 @@ for (const tool of schema.tools) {
   // The one field that must never appear: an input-method switch would advertise a capability the
     // product does not have and cannot test.
   if ('physical' in (is.properties ?? {})) fail(`${tool.name}: inputSchema must not expose a 'physical' field`);
+}
+
+// --- the host projection agrees with the registered parameters ------------------------------
+// The form is decided (A: DSH native plugin, spec.md R3.1'). That makes the projection part of the
+// contract rather than a private detail: the five named actions are what the docs promise, the one
+// registered tool is what the model actually gets, and the two must describe the same capability.
+{
+  const proj = schema.hostProjection;
+  if (!proj) fail('no hostProjection -- the delivery form is decided, so the projection belongs in the contract');
+  else {
+    if (proj.form !== 'A') fail(`hostProjection.form is '${proj.form}'; the owner chose A on 2026-11-19`);
+    if (!proj.why) fail('hostProjection has no stated reason');
+    const contractNames = schema.tools.map((t) => t.name).sort();
+    const mappedNames = Object.keys(proj.actions ?? {}).sort();
+    if (JSON.stringify(contractNames) !== JSON.stringify(mappedNames)) {
+      fail(`hostProjection.actions keys ${JSON.stringify(mappedNames)} != contract tool names ${JSON.stringify(contractNames)}`);
+    }
+    const contractActions = schema.tools.map((t) => t.action).sort();
+    const mappedActions = Object.values(proj.actions ?? {}).sort();
+    if (JSON.stringify(contractActions) !== JSON.stringify(mappedActions)) {
+      fail(`hostProjection action values ${JSON.stringify(mappedActions)} != contract actions ${JSON.stringify(contractActions)}`);
+    }
+    if (!existsSync(proj.source.split('#')[0])) fail(`hostProjection.source points at a missing file: ${proj.source}`);
+    // Every required argument a contract tool names must be sendable through the one registered
+    // tool, or the model is told to send something the registry rejects.
+    for (const tool of schema.tools) {
+      for (const arg of tool.inputSchema.required ?? []) {
+        if (arg === 'action') continue;
+        if (!(arg in PARAMETERS)) fail(`contract ${tool.name} requires '${arg}', which the registered tool does not accept`);
+      }
+    }
+    for (const extra of proj.extraWorkerActions ?? []) {
+      if (extra.exposed !== false) fail(`extraWorkerAction '${extra.action}' must be marked exposed:false (or it belongs in the contract)`);
+      if (!extra.why) fail(`extraWorkerAction '${extra.action}' has no stated reason`);
+      if ((proj.actions && Object.values(proj.actions).includes(extra.action))) {
+        fail(`extraWorkerAction '${extra.action}' is also a projected action`);
+      }
+    }
+    // And the model-facing parameter names must not include an input-method switch.
+    if ('physical' in PARAMETERS) fail('registered parameters expose a physical field');
+  }
 }
 
 // --- arguments in the documented cases must be arguments the schema accepts ------------------
