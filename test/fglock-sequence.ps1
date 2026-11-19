@@ -206,4 +206,11 @@ try { Set-Content -LiteralPath $exitF -Value 'x' -Force } catch { }
 Start-Sleep -Milliseconds 800
 try { Stop-Process -Id $proc.Id -Force -ErrorAction Stop } catch { }
 try { Stop-Process -Id $holder.Id -Force -ErrorAction SilentlyContinue } catch { }
+# Sweep any error dialog our spawns may have left (wt-style reproxy errors appear under a
+# different pid than the one Start-Process returned, so Stop-Process cannot reach them).
+$leftover = @(Get-WpmWindowList | Where-Object { $_.title -like '*Wpm*' -or ($_.cls -eq '#32770' -and $_.title -match 'Error') })
+foreach ($w in $leftover) {
+  [void][WpmWin]::PostMessageW([IntPtr][int64]$w.hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+  "cleanup: WM_CLOSE to leftover $($w.hwnd) [$($w.cls)] '$($w.title)'"
+}
 exit 0
