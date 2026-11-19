@@ -1,4 +1,4 @@
-# win.ps1 -- the IO half of the R2' engine: probe a target's doors, act through the cheapest
+﻿# win.ps1 -- the IO half of the R2' engine: probe a target's doors, act through the cheapest
 # door it has, and put the owner's focus back when the action cost them a flash.
 #
 # Layering is deliberate. decide.ps1 owns every judgement (pure, unit-tested). This file owns
@@ -83,6 +83,7 @@ public static class WpmWin
     public static string Txt(IntPtr h) { var s = new StringBuilder(1024); GetWindowTextW(h, s, s.Capacity); return s.ToString(); }
     public static string Fg() { return GetForegroundWindow().ToInt64().ToString(); }
     public static IntPtr FgHandle() { return GetForegroundWindow(); }
+    public static string Cursor() { POINT p; GetCursorPos(out p); return p.X + "," + p.Y; }
     public static uint PidOf(IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return p; }
     public static IntPtr Root(IntPtr h) { IntPtr r = GetAncestor(h, 2); return r == IntPtr.Zero ? h : r; }
 
