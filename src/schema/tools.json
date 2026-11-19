@@ -1,0 +1,185 @@
+{
+  "schemaVersion": "0.1.0",
+  "status": "form-neutral: consumed by either delivery form (DSH native plugin sidecar or MCP server); the form is not decided yet (task_56)",
+  "notes": [
+    "The five tool names are fixed here so both delivery forms expose the same action surface.",
+    "src/engine/engine.ps1 is the only implementation; this file is the contract, not a second implementation.",
+    "docs/refusals.md is the human-readable form of `refusals`; scripts/check-refusals.mjs keeps them equal.",
+    "The `refusalCases` array is executable: test/refusals-test.ps1 iterates it and binds the placeholders, so a documented refusal path cannot rot into fiction."
+  ],
+  "stance": {
+    "inputQueue": "no OS input-queue writes: no SendInput, no keybd_event, no mouse_event",
+    "focus": "no forged Alt key, no synthetic activation code",
+    "cursor": "the cursor is never moved: 0 px across 24 measured rounds (scripts/channel-raise-matrix.ps1)",
+    "tiers": "quiet (window messages) preferred over bounded-flash (UIA patterns); the flash tier must reverse itself once, and never pulls focus from a window the owner chose"
+  },
+  "refusals": [
+    { "code": "no_hwnd", "layer": "decision", "summary": "no usable target window handle" },
+    { "code": "paused", "layer": "decision", "summary": "the owner paused input; server-side refusal" },
+    { "code": "elevated_target", "layer": "decision", "summary": "target runs at a higher integrity level" },
+    { "code": "unreachable", "layer": "decision", "summary": "no message door and no usable UIA pattern" },
+    { "code": "terminal_no_door", "layer": "decision", "summary": "terminal text surface exposes neither a child window nor a document element" },
+    { "code": "needs_facts", "layer": "decision", "summary": "the caller supplied no measured facts for this target" },
+    { "code": "action_failed", "layer": "runtime", "summary": "the chosen channel threw while acting", "uncoveredReason": "needs a target whose channel reliably throws; not constructed this round (docs/refusals.md, gap 2)" },
+    { "code": "restore_failed", "layer": "runtime", "summary": "the OS refused to return the foreground after a flash", "uncoveredReason": "needs a real elevated window; task_52 (docs/refusals.md, gap 2)" }
+  ],
+  "tools": [
+    {
+      "name": "wpm_windows",
+      "action": "windows",
+      "engine": "Get-WpmWindowList",
+      "description": "List live top-level windows the engine could drive: hwnd, title, window class, owning pid and screen rect. Read-only. Visible, titled, non-minimized windows only, because a list padded with invisible helper windows makes target selection guesswork.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "refusals": [],
+      "noRefusalReason": "pure enumeration: no target is acted on, so there is nothing to refuse. An empty list means no window matched the filter, and that is reported as an empty list, not as a failure."
+    },
+    {
+      "name": "wpm_click",
+      "action": "click",
+      "engine": "Invoke-WpmAction -Action click",
+      "description": "Click at a screen coordinate inside the named window. Chooses the cheapest available door: a classic child window receives the click as a window message (quiet tier, measured 0/6 foreground changes), otherwise a UIA pattern is used and the foreground is reversed once afterwards (bounded-flash tier, measured net return 15..95 ms). The cursor does not move in either tier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hwnd": { "type": "string", "description": "Target top-level window handle, as returned by wpm_windows." },
+          "x": { "type": "integer", "description": "Screen X coordinate. Must resolve to a child window of the target, otherwise the action is refused instead of being sent somewhere else." },
+          "y": { "type": "integer", "description": "Screen Y coordinate." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." }
+        },
+        "required": ["hwnd", "x", "y"],
+        "additionalProperties": false
+      },
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "terminal_no_door", "action_failed", "restore_failed"]
+    },
+    {
+      "name": "wpm_type",
+      "action": "type",
+      "engine": "Invoke-WpmAction -Action type",
+      "description": "Write text into the named window: either the first editable classic child (quiet tier) or a UIA element named by the caller (bounded-flash tier). No keystrokes are synthesized; the text is delivered through the window message or the pattern itself.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hwnd": { "type": "string", "description": "Target top-level window handle." },
+          "text": { "type": "string", "description": "Text to write. Empty string is refused: it cannot be distinguished from a channel that silently did nothing." },
+          "elementName": { "type": "string", "description": "Optional UIA Name or AutomationId of the control to write into. Naming an element forces the UIA tier, because a message tier cannot address 'the control called X'." },
+          "replace": { "type": "boolean", "default": false, "description": "Replace the existing value instead of appending to it." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." }
+        },
+        "required": ["hwnd", "text"],
+        "additionalProperties": false
+      },
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "terminal_no_door", "action_failed", "restore_failed"]
+    },
+    {
+      "name": "wpm_focus",
+      "action": "focus",
+      "engine": "Invoke-WpmAction -Action focus",
+      "description": "Move keyboard focus to a named control inside the target, then reverse the foreground change once. This action always needs a UIA element: the message tier cannot set keyboard focus, so a window with no pattern is refused rather than clicked at a guessed coordinate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hwnd": { "type": "string", "description": "Target top-level window handle." },
+          "elementName": { "type": "string", "description": "UIA Name or AutomationId of the control that should hold focus." },
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." }
+        },
+        "required": ["hwnd", "elementName"],
+        "additionalProperties": false
+      },
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "terminal_no_door", "action_failed", "restore_failed"]
+    },
+    {
+      "name": "wpm_status",
+      "action": "status",
+      "engine": "Get-WpmStatus",
+      "description": "Report the engine's state and the desktop's focus table: paused flag, foreground window and pid, the control that holds keyboard focus, the age of the last human input, and the engine's stated stance. Read-only; useful before acting and after a refusal.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "refusals": [],
+      "noRefusalReason": "pure query: it reads the focus table and returns it. There is no target to refuse, and inventing a refusal code for this tool would create a branch that can never be exercised."
+    }
+  ],
+  "refusalCases": [
+    {
+      "id": "click-dead-hwnd",
+      "mode": "engine",
+      "tool": "wpm_click",
+      "args": { "hwnd": "$deadHwnd", "x": 100, "y": 100 },
+      "expect": "no_hwnd",
+      "note": "A handle that does not identify a live window. Measured, no window is touched."
+    },
+    {
+      "id": "click-while-paused",
+      "mode": "engine",
+      "tool": "wpm_click",
+      "args": { "hwnd": "$liveHwnd", "x": 100, "y": 100 },
+      "setup": "pause",
+      "expect": "paused",
+      "note": "Pause is a server-side refusal checked before any capability, so a paused engine cannot be talked into acting by a target that looks reachable. Note it is wpm_status that stays callable while paused (a query), not the action tools."
+    },
+    {
+      "id": "type-winforms-named-missing",
+      "mode": "engine",
+      "tool": "wpm_type",
+      "args": { "hwnd": "$winformsHwnd", "text": "x", "elementName": "$missingName" },
+      "expect": "unreachable",
+      "note": "WinForms has a message door but no UIA pattern. Naming an element suppresses the door (a message cannot address 'the control called X'), so the target is honestly unreachable rather than quietly clicked at a guessed child."
+    },
+    {
+      "id": "focus-winforms",
+      "mode": "engine",
+      "tool": "wpm_focus",
+      "args": { "hwnd": "$winformsHwnd", "elementName": "$missingName" },
+      "expect": "unreachable",
+      "note": "Focus requires UIA by definition; a WinForms target with no pattern must be refused, never approximated."
+    },
+    {
+      "id": "elevated-target",
+      "mode": "decision",
+      "tool": "wpm_click",
+      "facts": { "hwnd": "$liveHwnd", "elevatedTarget": true },
+      "expect": "elevated_target",
+      "note": "Decision-table instance only. Nothing sets this flag yet: win.ps1:292-297 states that elevation detection is deliberately absent rather than faked, and wiring it is task_52."
+    },
+    {
+      "id": "terminal-no-door",
+      "mode": "decision",
+      "tool": "wpm_type",
+      "facts": { "hwnd": "$liveHwnd", "family": "terminal" },
+      "expect": "terminal_no_door",
+      "note": "Decision-table instance only. A real terminal window is not launched in this run because findings.md:311-316 records a leftover-dialog accident on this host; the real evidence is the coverage census."
+    },
+    {
+      "id": "needs-facts",
+      "mode": "decision",
+      "tool": null,
+      "facts": null,
+      "expect": "needs_facts",
+      "note": "The absence of facts must refuse, not default to the quiet branch. Unreachable through the engine (facts are always measured), so this one guards the table when it is used on its own."
+    },
+    {
+      "id": "action-failed",
+      "mode": "none",
+      "tool": "wpm_type",
+      "args": { "hwnd": "$liveHwnd", "text": "x" },
+      "expect": "action_failed",
+      "note": "NOT COVERED: needs a target whose channel reliably throws. Not constructed this round; reported as uncovered rather than claimed."
+    },
+    {
+      "id": "restore-failed",
+      "mode": "none",
+      "tool": "wpm_focus",
+      "args": { "hwnd": "$liveHwnd", "elementName": "x" },
+      "expect": "restore_failed",
+      "note": "NOT COVERED: needs a real elevated window. task_52."
+    }
+  ]
+}

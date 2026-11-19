@@ -63,6 +63,19 @@ pass = run('powershell static-call syntax', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// The refusal vocabulary lives in three places (what fires / what is promised / what is explained)
+// and the action contract is what a model branches on. Both are cheap to check and expensive to
+// discover wrong at runtime, so they are gates rather than review items.
+pass = run('refusal vocabulary (code = schema = docs)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-refusals.mjs'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
+pass = run('tool schema contract', () => {
+  const r = spawnSync(process.execPath, ['test/schema-test.mjs'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 const js = [].concat(...roots.map((rt) => walk(rt, ['.mjs', '.js'])));
 const jsFail = [];
 for (const f of js) {
