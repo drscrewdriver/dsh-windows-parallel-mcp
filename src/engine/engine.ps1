@@ -1,4 +1,4 @@
-﻿# engine.ps1 -- the only place where a decision becomes a syscall.
+# engine.ps1 -- the only place where a decision becomes a syscall.
 #
 # One entry point, Invoke-WpmAction, and it always returns a result object rather than throwing on
 # a refusal: 'refused' is a normal outcome of this product, not an error path, and R3.2 requires
@@ -104,6 +104,28 @@ function Invoke-WpmAction {
     refusal = ''; reason = ''; detail = ''; latencyMs = 0
     focusTaken = 'false'; restoreOutcome = ''; restoreSetFg = ''; restoreJoined = ''
     effect = 'unverified'
+  }
+
+  # A QUERY IS NOT AN ACTION, and this branch is early on purpose. It used to sit inside the action
+  # chain, where 'status' fell through to the UIA branch and INVOKED the pattern it found -- a call
+  # whose entire purpose is to report state would click a control. It is also placed before the
+  # target check because a query has no target: 'what holds the focus' is answerable whatever the
+  # caller passed, and refusing it for an unreachable window would be a query lying about why it
+  # is empty. (Found by reading the branch order while writing the refusal cases, not by a failing
+  # run -- the assertion in test/refusals-test.ps1 pins the fixed behaviour, it did not catch it.)
+  if ($Action -eq 'status') {
+    $st = Get-WpmStatus
+    $result.ok = $true
+    $result.channel = 'none'; $result.tier = 'none'
+    $result.detail = 'status: query only, no action taken'
+    $result.foreground = $st.foreground
+    $result.foregroundPid = $st.foregroundPid
+    $result.focusControl = $st.focusControl
+    $result.lastInputAgeMs = $st.lastInputAgeMs
+    $result.paused = $st.paused
+    $result.stance = $st.stance
+    $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+    return $result
   }
 
   if (-not [WpmWin]::IsWindow($h)) {
