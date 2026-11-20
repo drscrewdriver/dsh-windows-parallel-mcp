@@ -4,7 +4,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.1.2 — 2026-11-21
+## 0.1.2 — 2026-11-20
+
+(Registry time `2026-11-20T17:15:15Z` UTC = `2026-11-21 01:15` Beijing; the date follows the same
+UTC convention as the entries below, because the header's rule is "the publish time is the promise".)
 
 The proof chain became real: what started as "the README says the cursor never moves" ended as a
 per-call measurement, a build-time guarantee, and — recorded honestly — three judgment designs that
