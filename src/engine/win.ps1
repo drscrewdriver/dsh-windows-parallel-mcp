@@ -160,6 +160,69 @@ public static class WpmWin
         return theirs > mine;
     }
 
+    // ---- overlay support: ex-styles, hotkey, and the cross-thread control board --------------
+    // WpmCtl is the ONE shared state between the worker's main thread (stdin/protocol/actions)
+    // and the overlay thread (WPF dispatcher, global hotkey). A PowerShell script variable is
+    // not visible across runspaces, so a static holder is the honest shape; the bools are
+    // volatile because the hotkey handler writes them from another thread while actions read
+    // them mid-flight.
+    [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
+    [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr h, int i, int v);
+    [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
+    [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id);
+
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_TOPMOST = 0x00000008;
+    public const int WS_EX_TRANSPARENT = 0x00000020;
+    public const int WS_EX_LAYERED = 0x00080000;
+    public const int WS_EX_NOACTIVATE = 0x08000000;
+    public const int WM_HOTKEY = 0x0312;
+    public const int WM_CLOSE = 0x0010;
+    public const uint MOD_CONTROL = 0x0002;
+    public const uint MOD_ALT = 0x0001;
+
+    [DllImport("user32.dll", SetLastError=true)] static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr ctx);
+
+    /// <summary>
+    /// Declare this process DPI aware, BEFORE any window exists.
+    /// Why this is not cosmetic: PowerShell starts DPI UNAWARE, so Windows virtualises every
+    /// coordinate it passes to user32. The engine receives PHYSICAL screen pixels (that is what a
+    /// click point is), the marker is placed through the same user32 -- and with an unaware process
+    /// a target of (470,410) rendered the marker at (303,263), exactly /1.5 on this 150% display.
+    /// Two components, one coordinate space, or the AI cursor points at the wrong place while every
+    /// style assertion still passes. Must run before any window is created (per-process setting);
+    /// returns false when the manifest already set it, which is success, not failure.
+    /// </summary>
+    public static bool EnsureDpiAware() {
+        try { SetThreadDpiAwarenessContext(new IntPtr(-4)); } catch { }   // PER_MONITOR_AWARE_V2
+        try { return SetProcessDPIAware(); } catch { return false; }
+    }
+
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+
+    /// <summary>
+    /// Move a window in PHYSICAL pixels without activating it or changing its z-order.
+    /// This exists instead of WPF's Window.Left/Top because WPF's units are device independent while
+    /// every coordinate this product receives from Win32 is physical. Measured on this machine
+    /// (150% display): setting Left/Top put the marker at (303,263) for a target of (470,410) -- the
+    /// DIP conversion and the window's actual rendering disagreed by the scale factor, and no amount
+    /// of matrix arithmetic inside the process fixes a process-wide DPI-awareness mismatch.
+    /// SetWindowPos takes the same units the caller has, so there is nothing left to guess.
+    /// </summary>
+    public static bool MoveNoActivate(IntPtr h, int x, int y, int cx, int cy) {
+        return SetWindowPos(h, IntPtr.Zero, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    /// <summary>Add ex-style bits and return the new value (the trio lives here, once).</summary>
+    public static int AddExStyles(IntPtr h, int bits) {
+        int v = GetWindowLong(h, GWL_EXSTYLE);
+        SetWindowLong(h, GWL_EXSTYLE, v | bits);
+        return v | bits;
+    }
+
     public const int SW_MINIMIZE = 6;
     public const int SW_SHOWNA = 8;
     public const int SW_RESTORE = 9;
@@ -246,6 +309,43 @@ public static class WpmWin
 }
 '@
 }
+
+if (-not ('WpmCtl' -as [type])) {
+Add-Type -TypeDefinition @'
+using System;
+public static class WpmCtl {
+    public static volatile bool Paused = false;
+    public static volatile bool OverlayOn = false;
+    public static volatile bool HotkeyOk = false;
+    // The chord that ACTUALLY registered, not the one the docs promise: on this machine Ctrl+Alt+Q
+    // is already owned by another app (RegisterHotKey -> 1409, measured in
+    // scripts/hotkey-availability.ps1, 7/8 other candidates free). A silent fallback would make the
+    // README's "Ctrl+Alt+Q" untrue with nothing to notice; the real chord is reported instead.
+    public static string HotkeyLabel = "";
+    // Marker placement travels through these fields INSTEAD of a cross-thread Dispatcher.Invoke.
+    // Measured (.tmp/ov-seg.log): Invoke(priority, Action) from the worker's thread cost 1818ms and
+    // sometimes never returned -- the delegate is a PowerShell scriptblock and the overlay thread is
+    // already inside Dispatcher.Run(), so the engine has to reach a runspace that is busy. Writing
+    // three fields costs nothing, and the overlay's own pump applies them from its own thread.
+    public static volatile int MarkerX = -1;
+    public static volatile int MarkerY = -1;
+    public static volatile bool MarkerHide = false;
+    public static volatile int MarkerSeq = 0;   // incremented per request; the pump compares it
+    // volatile is illegal on long in C# (the compiler rejects it, which is the point: a 64-bit
+    // read is not guaranteed atomic). The hwnd is written once before any reader exists and read
+    // as a value, so plain static is honest here; Interlocked would be the answer if it changed.
+    public static long OverlayHwnd = 0;
+    public static string Reason = "";
+    public static object Dispatcher = null;   // overlay thread's WPF dispatcher (set by that thread)
+    public static object Window = null;        // the marker window (touched ONLY on its own thread)
+    public static object Timer = null;         // auto-hide timer (same rule)
+}
+'@
+}
+
+# Before anything can create a window. See EnsureDpiAware: an unaware process virtualises the same
+# coordinates the engine uses for clicks, which is how the marker ended up off by the display scale.
+$script:WpmDpiAware = [WpmWin]::EnsureDpiAware()
 
 $script:WpmUia = $null
 function Get-WpmUiaCached {

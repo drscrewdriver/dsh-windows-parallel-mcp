@@ -1,4 +1,4 @@
-# engine.ps1 -- the only place where a decision becomes a syscall.
+﻿# engine.ps1 -- the only place where a decision becomes a syscall.
 #
 # One entry point, Invoke-WpmAction, and it always returns a result object rather than throwing on
 # a refusal: 'refused' is a normal outcome of this product, not an error path, and R3.2 requires
@@ -19,23 +19,35 @@ $script:WpmEngineRoot = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'decide.ps1')
 . (Join-Path $PSScriptRoot 'win.ps1')
 
-$script:WpmPaused = $false
+# THE PAUSE FLAG LIVES IN [WpmCtl], a static holder -- not in a script variable. The global hotkey
+# (Ctrl+Alt+Q, overlay.ps1) flips it from the overlay thread while actions read it on the main
+# thread; two copies across threads is the bug pattern this repo keeps meeting, and a script-scope
+# variable is exactly that second copy. $script:WpmPauseReason stays here because it is only ever
+# set through Set-WpmPaused, which runs on the main thread.
 $script:WpmPauseReason = ''
 
 function Set-WpmPaused([bool]$On, [string]$Reason = 'owner') {
-  $script:WpmPaused = $On
+  [WpmCtl]::Paused = $On
   $script:WpmPauseReason = if ($On) { $Reason } else { '' }
 }
 
 function Get-WpmStatus {
   $entry = Get-WpmFocusEntry
   return @{
-    paused = $script:WpmPaused
+    paused = [bool][WpmCtl]::Paused
     pauseReason = $script:WpmPauseReason
     foreground = $entry.fgHwnd
     foregroundPid = $entry.fgPid
     focusControl = $entry.focusHwnd
     lastInputAgeMs = $entry.lastInputAgeMs
+    # The control board travels with status: whether the owner's overlay/hotkey surface is up, and
+    # whether the hotkey actually registered. A silent 'overlay off' would make the README's
+    # Ctrl+Alt+Q promise untrue with no way to notice.
+    overlayRunning = [bool][WpmCtl]::OverlayOn
+    hotkeyRegistered = [bool][WpmCtl]::HotkeyOk
+    hotkeyLabel = [string][WpmCtl]::HotkeyLabel
+    overlayReason = [string][WpmCtl]::Reason
+    dpiAware = [bool]$script:WpmDpiAware
     stance = 'no physical injection; no forged-Alt foreground trick'
   }
 }
@@ -135,7 +147,7 @@ function Invoke-WpmAction {
 
   $probe = Get-WpmFacts -Hwnd $h -Action $Action -ElementName $ElementName
   $facts = $probe.facts
-  $facts.paused = $script:WpmPaused
+  $facts.paused = [bool][WpmCtl]::Paused
   if ($ElementName) {
     # A named control cannot be addressed through a window message: the message tiers take
     # coordinates or a child HWND, and "the Save button" is neither. Suppressing the door here is
