@@ -202,16 +202,17 @@ function Invoke-WpmAction {
   # before-value to be falsifiable.
   $entry = Get-WpmFocusEntry
   $raisedHwnd = ''
-  # THE PRE-ACTION CONTROL WINDOW. This is sampled here, immediately BEFORE the door call is issued,
-  # so that during it, by construction, WE have done nothing. WHY A CONTROL IS REQUIRED AND NOT JUST
-  # A THRESHOLD: "unexplained motion" from GetLastInputInfo proves no PHYSICAL input happened in the
-  # gap -- it cannot tell our action apart from some background app's own timer nudging the cursor.
-  # Judging that against a hardcoded 1px is the vacuous-control trap this repo wrote down once
-  # (P0 task_5(f): "the reset control passed vacuously"). So the floor is MEASURED: whatever
-  # unexplained motion the desktop produces while we do nothing is the environment's noise floor, and
-  # the action's own window is judged against IT. A jittery background app raises the floor and a
-  # clean action still passes honestly; a desktop at rest keeps the floor ~0 and a real disturbance
-  # still fails. Kept short (80ms): a few samples, no perceptible slowdown.
+  # THE PRE-ACTION CONTROL WINDOW. Sampled here, immediately BEFORE the door call, so that during it,
+  # by construction, WE have done nothing. WHY A CONTROL IS REQUIRED AND NOT JUST A THRESHOLD:
+  # "unexplained motion" from GetLastInputInfo proves no PHYSICAL input happened in the gap -- it
+  # cannot tell our action apart from some background app nudging the cursor or stealing focus. A
+  # hardcoded threshold is the vacuous-control trap this repo wrote down once (P0 task_5(f): "the
+  # reset control passed vacuously"), and three real clicks proved it: a clean click measured isolated
+  # 3.16px and 7.07px cursor jumps. So the judgment is STRUCTURAL, decided in lib/proof-window.mjs
+  # using BOTH windows: sustained multi-gap cursor motion fails (no ambient correction drags across
+  # gaps), an isolated single jump is inconclusive (a position delta cannot name its cause), and a
+  # foreground/focus switch is blamed on us (fail) only when the control window shows the desktop was
+  # NOT already doing it. Kept short (80ms): a few samples, no perceptible slowdown.
   $controlSamples = Get-WpmProofWindow -Ms 80
   $tAct = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 

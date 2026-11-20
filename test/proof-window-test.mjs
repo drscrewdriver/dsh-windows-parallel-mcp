@@ -1,16 +1,12 @@
-// proof-window.test.mjs -- the product's central claim ("driving a window never disturbs the
-// owner") becomes a TESTABLE statement only if the judgment can be pinned against windows whose
-// right answer is known by construction. This is that file. No syscall, no process: every sample
-// below is hand-authored, so a PASS here is a proof about the ARITHMETIC, not about a lucky desktop.
+// proof-window-test.mjs -- the product's central claim ("driving a window never disturbs the owner")
+// is testable ONLY if the judgment can be pinned against windows whose right answer is known by
+// construction. This is that file. No syscall, no process: every sample below is hand-authored, so a
+// PASS here is a proof about the ARITHMETIC, not about a lucky desktop.
 //
-// The five cases are chosen to fail in BOTH directions, which is the only way to know the
-// attribution is real and not a constant 'pass':
-//   1. quiet window, cursor still            -> pass
-//   2. a HUMAN moved the mouse, software did not -> pass  (motion is attributed to the human)
-//   3. the SOFTWARE moved the cursor, human idle -> fail  (this is the thing we forbid)
-//   4. the SOFTWARE switched the foreground, human idle -> fail
-//   5. input-age unreadable (secure desktop) -> inconclusive, and a real software move with an
-//      unreadable instrument must NEVER be laundered into a pass.
+// The cases are chosen to fail in BOTH directions, which is the only way to know the attribution is
+// real and not a constant: a verdict function that only ever returns 'pass' and one that only ever
+// returns 'fail' are both worthless. The three-verdict design (pass / inconclusive / fail) is
+// exercised here from the three-run desktop investigation recorded in proof-window.mjs's header.
 import { evaluateProof, softwareCursorEvidence, verdictFor } from '../lib/proof-window.mjs';
 
 let pass = 0;
@@ -20,149 +16,150 @@ const ok = (name, cond, detail = '') => {
   else { failures.push(name); console.log(`  FAIL  ${name}${detail ? ` :: ${detail}` : ''}`); }
 };
 
-// inputAgeMs is "ms since last physical input". An AGING age (each sample older than the last) means
-// NO new physical event; a DROPPING age means a human just touched something inside that gap.
+// inputAgeMs is "ms since last physical input". An AGING age (each sample's implied event time
+// unchanged) means NO new physical input; a DROPPING age means a human touched something in the gap.
 const mk = (n, over) => Array.from({ length: n }, (_, i) => ({
   ts: 1000 + i * 20,
   cx: 500, cy: 400,
   fg: '111', focus: '222',
-  inputAgeMs: 5000 + i * 20,   // monotonic aging => no physical input ever
+  inputAgeMs: 5000 + i * 20,   // monotonic aging => the same physical event ages, nobody new
   ...over?.(i),
 }));
 
-// 1. quiet, cursor still
+// 1. quiet window, cursor still => PASS. The direct, strong case.
 {
   const ev = evaluateProof(mk(20));
   ok('quiet window => pass', ev.verdict === 'pass', JSON.stringify({ v: ev.verdict, r: ev.reason }));
-  ok('  raw cursor max delta is 0', ev.cursorMaxDeltaPx === 0, String(ev.cursorMaxDeltaPx));
-  ok('  unexplained delta 0, events 0', ev.attribution.unexplainedCursorMaxDeltaPx === 0
-    && ev.attribution.physicalInputEvents === 0, JSON.stringify(ev.attribution));
+  ok('  zero unexplained motion gaps', ev.attribution.unexplainedCursorMotionGaps === 0,
+    String(ev.attribution?.unexplainedCursorMotionGaps));
+  ok('  dimensions all pass', ev.dimensions.cursor === 'pass' && ev.dimensions.foreground === 'pass'
+    && ev.dimensions.focus === 'pass', JSON.stringify(ev.dimensions));
 }
 
-// 2. a HUMAN moved the mouse; the software never touched it. The whole cursor path is human motion,
-//    so the SOFTWARE-attributable path must be 0 and the verdict stays pass.
+// 2. a HUMAN moved the mouse; the software did not. All motion is human-attributed, so zero
+//    UNEXPLAINED gaps remain and the verdict is still pass -- proof the human path is excluded.
 {
-  // The human grabs the mouse at i=8 and lets go at i=14. Movement and the DROPPED input-age must
-  // cover EXACTLY the same gaps. After releasing, the cursor HOLDS at 740 -- a snap-back to 500 in
-  // a now-human-quiet gap would itself be software motion and correctly fail, which is the wrong
-  // lesson for this case. So: drag 8..14, then still.
   const withHuman = mk(20).map((s, i) => {
     if (i >= 8 && i <= 14) return { ...s, cx: 500 + (i - 8) * 40, inputAgeMs: 5 }; // human: move + fresh event
     if (i > 14) return { ...s, cx: 740 };                                           // released, cursor still
-    return s; // i < 8: cursor at 500, age aging (nobody touching)
+    return s;
   });
   const ev = evaluateProof(withHuman);
-  ok('human-only motion => pass', ev.verdict === 'pass', JSON.stringify({ v: ev.verdict, raw: ev.cursorMaxDeltaPx, unexp: ev.attribution?.unexplainedCursorMaxDeltaPx }));
-  // cursorMaxDeltaPx is the largest PER-GAP delta (the human moved 40px each gap), not the total.
-  // The point: a lot of RAW movement happened (max 40px, total path 280px) yet NONE of it is
-  // software-attributable -- unexplained path stays ~0. Asserting total path catches the metric mixup.
-  ok('  raw path is large but unexplained path is ~0',
-    ev.cursorTotalPathPx > 100 && (ev.attribution.unexplainedCursorPathPx ?? 0) < 1,
-    `rawPath=${ev.cursorTotalPathPx} unexpPath=${ev.attribution?.unexplainedCursorPathPx}`);
+  ok('human-only motion => pass', ev.verdict === 'pass',
+    JSON.stringify({ v: ev.verdict, gaps: ev.attribution?.unexplainedCursorMotionGaps }));
+  ok('  raw path is large but unexplained gaps are zero',
+    ev.cursorTotalPathPx > 100 && ev.attribution.unexplainedCursorMotionGaps === 0,
+    `rawPath=${ev.cursorTotalPathPx} gaps=${ev.attribution?.unexplainedCursorMotionGaps}`);
   ok('  at least one physical event was attributed', ev.attribution.physicalInputEvents > 0,
     String(ev.attribution.physicalInputEvents));
 }
 
-// 3. the SOFTWARE moved the cursor while the human was idle (age keeps aging). This is forbidden.
+// 3. THE ISOLATED AMBIENT NUDGE => INCONCLUSIVE, never a wolf-cry fail, never a laundered pass.
+//    This is the 3.16px/7.07px real-desktop case: one gap of cursor motion with NO physical input.
+//    A single position delta cannot name its cause (us or some other process), so the gate reports it.
 {
-  const samples = mk(20, (i) => i === 10 ? { cx: 500 + 800 } : (i === 11 ? { cx: 500 + 800 } : {}));
-  const ev = evaluateProof(samples);
-  ok('software moved cursor, human idle => fail', ev.verdict === 'fail', JSON.stringify({ v: ev.verdict, unexp: ev.attribution?.unexplainedCursorMaxDeltaPx }));
-  ok('  the unexplained delta equals the jump', ev.attribution.unexplainedCursorMaxDeltaPx >= 799,
-    String(ev.attribution?.unexplainedCursorMaxDeltaPx));
-  ok('  softwareCursorEvidence surfaces the number', softwareCursorEvidence(ev).maxPx >= 799,
+  const jump = mk(20, (i) => i === 10 ? { cx: 1300 } : (i > 10 ? { cx: 1300 } : {})); // one 800px warp, then still
+  const ev = evaluateProof(jump);
+  ok('isolated single-gap cursor jump => inconclusive (not fail, not pass)',
+    ev.verdict === 'inconclusive', JSON.stringify({ v: ev.verdict, gaps: ev.attribution?.unexplainedCursorMotionGaps }));
+  ok('  exactly one unexplained motion gap', ev.attribution.unexplainedCursorMotionGaps === 1,
+    String(ev.attribution?.unexplainedCursorMotionGaps));
+  ok('  the number is surfaced in the reason', String(ev.reason).includes('800'), String(ev.reason));
+}
+
+// 4. SUSTAINED multi-gap cursor motion => FAIL. The signature of cursor driving (a drag/sweep), which
+//    no single ambient position correction produces. Structure, not size, is the trigger.
+{
+  const drag = mk(20, (i) => i >= 6 ? { cx: 500 + (i - 6) * 100 } : {}); // motion across many gaps
+  const ev = evaluateProof(drag);
+  ok('multi-gap cursor drag => fail', ev.verdict === 'fail',
+    JSON.stringify({ v: ev.verdict, gaps: ev.attribution?.unexplainedCursorMotionGaps }));
+  ok('  more than one unexplained motion gap', ev.attribution.unexplainedCursorMotionGaps >= 2,
+    String(ev.attribution?.unexplainedCursorMotionGaps));
+  ok('  softwareCursorEvidence carries the gap count', softwareCursorEvidence(ev).motionGaps >= 2,
     JSON.stringify(softwareCursorEvidence(ev)));
 }
 
-// 4. the SOFTWARE switched the foreground with the human idle.
+// 5. FOREGROUND/FOCUS with a clean control => FAIL. The control window proves the desktop was NOT
+//    stealing seconds before, so a switch during the action is ours to explain.
 {
-  const samples = mk(20, (i) => i >= 12 ? { fg: '999' } : {});
-  const ev = evaluateProof(samples);
-  ok('software switched foreground, human idle => fail', ev.verdict === 'fail',
-    JSON.stringify({ v: ev.verdict, ufg: ev.attribution?.unexplainedForegroundSwitches }));
-  ok('  unexplained foreground switch counted', ev.attribution.unexplainedForegroundSwitches >= 1,
-    String(ev.attribution?.unexplainedForegroundSwitches));
+  const cleanControl = mk(20);
+  const switched = mk(20, (i) => i >= 12 ? { fg: '999' } : {});
+  const ev = evaluateProof(switched, { control: cleanControl });
+  ok('foreground switch with clean control => fail', ev.verdict === 'fail',
+    JSON.stringify({ v: ev.verdict, dims: ev.dimensions }));
+  ok('  the foreground dimension is the failing one', ev.dimensions.foreground === 'fail'
+    && ev.dimensions.cursor === 'pass', JSON.stringify(ev.dimensions));
+
+  const focusLost = mk(20, (i) => i >= 10 ? { focus: '888' } : {});
+  const evFc = evaluateProof(focusLost, { control: cleanControl });
+  ok('focus change with clean control => fail', evFc.dimensions.focus === 'fail',
+    JSON.stringify(evFc.dimensions));
 }
 
-// 5. input-age unreadable (every sample -1, e.g. secure desktop): the instrument cannot exonerate
-//    the software, so a real cursor jump there must be INCONCLUSIVE, never laundered into a pass.
+// 6. FOREGROUND/FOCUS when the CONTROL also switched => INCONCLUSIVE. The desktop was stealing focus on
+//    its own seconds before; we cannot pin its behaviour on our action. Reporting it is the honest
+//    answer -- fail would blame us for the desktop, pass would hide that focus left.
+{
+  const busyControl = mk(20, (i) => i >= 5 ? { fg: 'CHURN' } : {});   // desktop stealing in the control
+  const alsoSwitch = mk(20, (i) => i >= 12 ? { fg: '999' } : {});
+  const ev = evaluateProof(alsoSwitch, { control: busyControl });
+  ok('foreground switch mirroring a busy control => inconclusive', ev.verdict === 'inconclusive',
+    JSON.stringify({ v: ev.verdict, dims: ev.dimensions }));
+  ok('  foreground dimension is inconclusive, not fail', ev.dimensions.foreground === 'inconclusive',
+    JSON.stringify(ev.dimensions));
+}
+
+// 7. unreadable instrument (secure desktop, every age = -1) => INCONCLUSIVE. Silence is not innocence:
+//    the gate cannot exonerate the software, and a real drag on an unreadable instrument must still
+//    never read as pass.
 {
   const unreadable = mk(20).map((s) => ({ ...s, inputAgeMs: -1 }));
   const evIdle = evaluateProof(unreadable);
-  ok('unreadable age, cursor still => inconclusive (not pass)', evIdle.verdict === 'inconclusive',
+  ok('unreadable age everywhere => inconclusive (not pass)', evIdle.verdict === 'inconclusive',
     JSON.stringify({ v: evIdle.verdict, r: evIdle.reason }));
-
   const jumpUnreadable = mk(20, (i) => i >= 10 ? { cx: 1500 } : {}).map((s) => ({ ...s, inputAgeMs: -1 }));
-  const evJump = evaluateProof(jumpUnreadable);
-  ok('unreadable age + cursor jump => fail or inconclusive, NEVER pass',
-    evJump.verdict !== 'pass', JSON.stringify({ v: evJump.verdict }));
+  ok('unreadable age + cursor jump => never pass', evaluateProof(jumpUnreadable).verdict !== 'pass',
+    evaluateProof(jumpUnreadable).verdict);
 }
 
-// 6. too few samples: honest 'insufficient', the caller must not invent a verdict.
+// 8. too few samples => 'insufficient'. The caller must not invent a verdict from nothing.
 {
   ok('2 samples => insufficient', evaluateProof(mk(2)).verdict === 'insufficient');
   ok('0 samples => insufficient', evaluateProof([]).verdict === 'insufficient');
-  ok('malformed entries are dropped, not fatal',
+  ok('malformed entries dropped, not fatal',
     evaluateProof([{ ts: 1 }, null, { ts: 2, cx: 0, cy: 0, fg: 'a', focus: 'b', inputAgeMs: 10 }, { ts: 3 }]).verdict !== 'pass');
 }
 
-// 7. verdictFor is reusable and the 1px floor treats sub-pixel jitter as still.
+// 9. THE VERDICT ORDERING: fail > inconclusive > pass, decided PER DIMENSION and folded worst-first.
+//    A clean cursor but a focus steal must not be rescued by the good dimension.
 {
-  const subPixel = { unexplainedCursorMaxDeltaPx: 0.5, unexplainedForegroundSwitches: 0, unexplainedFocusChanges: 0, unreadableInputAgeGaps: 0 };
-  ok('0.5px jitter => pass (not treated as motion)', verdictFor(subPixel, 20).verdict === 'pass',
-    JSON.stringify(verdictFor(subPixel, 20)));
-  ok('2px => fail', verdictFor({ ...subPixel, unexplainedCursorMaxDeltaPx: 2 }, 20).verdict === 'fail');
-  // a focus-only disturbance (no cursor move) must still fail
-  ok('focus change only => fail', verdictFor({ unexplainedCursorMaxDeltaPx: 0, unexplainedForegroundSwitches: 0, unexplainedFocusChanges: 1, unreadableInputAgeGaps: 0 }, 20).verdict === 'fail');
+  const okControl = mk(20);
+  const cursorQuietFocusStolen = mk(20, (i) => i >= 10 ? { focus: 'X' } : {});
+  const ev = evaluateProof(cursorQuietFocusStolen, { control: okControl });
+  ok('clean cursor + focus steal (clean control) => overall fail', ev.verdict === 'fail',
+    JSON.stringify({ v: ev.verdict, dims: ev.dimensions }));
 }
 
-// 8. THE CONTROL WINDOW. This is what makes the claim honest on a machine where something OTHER than
-//    our action moves the cursor with nobody touching the mouse. Found by the real click arm: on a
-//    desktop with an ambient nudge, a clean click measured 3.16px of unexplained motion and failed
-//    against a hardcoded 1px. The floor is now MEASURED from a window where by construction we did
-//    nothing -- and the arms below pin both directions so the control cannot become a rubber stamp.
+// 10. verdictFor direct: the gap-count is the cursor trigger, independent of pixel size.
 {
-  // A control window where the desktop itself produced ~4px of unexplained motion.
-  const jittery = (px) => mk(20, (i) => i === 5 ? { cx: 500 + px } : (i > 5 ? { cx: 500 + px } : {}));
-  const control = jittery(4);
-  const cEval = evaluateProof(control);
-  ok('control window itself shows ~4px unexplained', cEval.attribution.unexplainedCursorMaxDeltaPx >= 3.5,
-    String(cEval.attribution?.unexplainedCursorMaxDeltaPx));
+  const oneGap = { unexplainedCursorMotionGaps: 1, unexplainedCursorMaxDeltaPx: 5000, unexplainedForegroundSwitches: 0, unexplainedFocusChanges: 0, unreadableInputAgeGaps: 0 };
+  ok('one gap of 5000px => inconclusive (size alone never fails)',
+    verdictFor(oneGap, null, 20).dimensions.cursor === 'inconclusive',
+    JSON.stringify(verdictFor(oneGap, null, 20).dimensions));
+  const twoGaps = { ...oneGap, unexplainedCursorMotionGaps: 2, unexplainedCursorMaxDeltaPx: 3 };
+  ok('two gaps of 3px => fail (structure fails even at small size)',
+    verdictFor(twoGaps, null, 20).dimensions.cursor === 'fail',
+    JSON.stringify(verdictFor(twoGaps, null, 20).dimensions));
+  ok('zero gaps => pass', verdictFor({ ...oneGap, unexplainedCursorMotionGaps: 0 }, null, 20).dimensions.cursor === 'pass');
+}
 
-  // Same 4px in the ACTION window: against a measured floor it is PASS (ambient, not ours);
-  // without a control it is still FAIL (strict 1px, fail closed). Both directions matter.
-  const sameAction = jittery(4);
-  const withControl = evaluateProof(sameAction, { control });
-  const withoutControl = evaluateProof(sameAction);
-  ok('4px action + 4px control => pass', withControl.verdict === 'pass',
-    JSON.stringify({ v: withControl.verdict, floor: withControl.floorPx, used: withControl.controlUsed }));
-  ok('  floor was measured from control and reported', withControl.controlUsed === true && withControl.floorPx >= 4,
-    `floorPx=${withControl.floorPx} controlUsed=${withControl.controlUsed}`);
-  ok('4px action, NO control => fail (fail closed, never hope the floor is generous)',
-    withoutControl.verdict === 'fail', JSON.stringify({ v: withoutControl.verdict, floor: withoutControl.floorPx }));
-
-  // THE CONTROL MUST NOT BECOME A RUBBER STAMP. A real drag (500px) on a jittery desktop still fails.
-  const drag = mk(20, (i) => i >= 6 ? { cx: 500 + (i - 6) * 100 } : {});
-  const dragged = evaluateProof(drag, { control });
-  ok('a real 500px drag still fails despite a jittery control', dragged.verdict === 'fail',
-    JSON.stringify({ v: dragged.verdict, unexp: dragged.attribution?.unexplainedCursorMaxDeltaPx, floor: dragged.floorPx }));
-
-  // Foreground/focus keep the ZERO bar even with a control that is itself switching: a background
-  // app stealing focus is not a licence for our action to do it. This is the asymmetry that makes
-  // 'floor' mean cursor noise only.
-  const fgControl = mk(20, (i) => i >= 5 ? { fg: '999' } : {});
-  const fgAction = mk(20, (i) => i >= 10 ? { fg: '888' } : {});
-  const fgEval = evaluateProof(fgAction, { control: fgControl });
-  ok('unexplained foreground switch fails even when the control also switched', fgEval.verdict === 'fail',
-    JSON.stringify({ v: fgEval.verdict, ufg: fgEval.attribution?.unexplainedForegroundSwitches }));
-
-  // A control too short to judge is IGNORED, and the action falls back to the strict floor --
-  // "no usable control" must never silently widen the bar.
-  const tinyControl = mk(2);
-  const tinyEval = evaluateProof(jittery(4), { control: tinyControl });
-  ok('unusable control (too few samples) => strict floor, 4px fails',
-    tinyEval.controlUsed === false && tinyEval.verdict === 'fail',
-    JSON.stringify({ v: tinyEval.verdict, used: tinyEval.controlUsed, floor: tinyEval.floorPx }));
+// 11. NO CONTROL falls back conservatively, never widening: an action foreground switch with no
+//     control data is still the software's to explain (fail), and an isolated jump stays inconclusive.
+{
+  const fgSwitchNoControl = mk(20, (i) => i >= 10 ? { fg: '9' } : {});
+  ok('foreground switch, NO control => fail (fail closed, never widen the bar on missing data)',
+    evaluateProof(fgSwitchNoControl).verdict === 'fail', JSON.stringify(evaluateProof(fgSwitchNoControl).dimensions));
 }
 
 console.log('');
