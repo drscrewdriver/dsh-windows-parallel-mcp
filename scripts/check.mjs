@@ -98,6 +98,37 @@ pass = run('host half + sidecar (process)', () => {
   return { ok: good, out: out.join('\n') };
 }) && pass;
 
+// The overlay is the product's visible surface, and its promises are syscall answers rather than
+// looks: the ex-style trio is ON the window, Show() does not take the foreground, a click at the
+// marker lands on the window underneath, the global chord flips the ONE pause flag, and Stop
+// leaves nothing behind. Written because the first version of this layer hung on Stop and would
+// have shipped a "pause switch" that deadlocked -- the trace is in .tmp/ov-step.log.
+// Desktop-sensitive arms SKIP rather than FAIL when real input happened in the same window, so
+// this is safe to run while the owner is working. It costs ~12s, so it goes last.
+pass = run('overlay promises (desktop, STA)', () => {
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-STA', '-File', 'test/overlay-test.ps1'], { encoding: 'utf8', timeout: 180000 });
+  const raw = ((r.stdout || '') + (r.stderr || '')).trim();
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  const notable = lines.filter((l) => /^(FAIL|SKIP|INFO)/.test(l));
+  const tail = lines.filter((l) => /passed,/.test(l)).slice(-1)[0] || lines.slice(-1)[0] || '(no output)';
+  return { ok: r.status === 0, out: notable.length ? `${tail} | ${notable.join(' | ')}` : tail };
+}) && pass;
+
+// The marker is a product claim ("the AI cursor shows the point that was acted on") and it lives in
+// a window, not in a result object -- so it needs a real click through the SHIPPED plugin and an
+// INDEPENDENT oracle for the window rect (scripts/probe-overlay-rect.ps1, which knows nothing about
+// overlay.ps1). Cheap enough to gate: ~10s including a WinForms target. This is the arm that found
+// the DPI defect (marker at 303,263 for a target of 470,410) and the cross-thread Invoke defect
+// (1818ms), neither of which any unit test could see.
+pass = run('marker end-to-end (real click, independent oracle)', () => {
+  const r = spawnSync(process.execPath, ['test/marker-e2e.mjs'], { encoding: 'utf8', timeout: 180000 });
+  const lines = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').map((l) => l.trim()).filter(Boolean);
+  const notable = lines.filter((l) => /^(FAIL|WARN)/.test(l));
+  const tail = lines.filter((l) => /passed,/.test(l)).slice(-1)[0] || lines.slice(-1)[0] || '(no output)';
+  return { ok: r.status === 0, out: notable.length ? `${tail} | ${notable.join(' | ')}` : tail };
+}) && pass;
+
 const js = [].concat(...roots.map((rt) => walk(rt, ['.mjs', '.js'])));
 const jsFail = [];
 for (const f of js) {
