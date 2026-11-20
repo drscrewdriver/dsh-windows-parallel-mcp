@@ -13,11 +13,17 @@
 //    a pid: a reaped-but-still-writing sampler would otherwise lose its tail samples.
 //  * summarize() attributes every event to physical input or not. It does NOT decide
 //    pass/fail -- that is src/kernel/proof.ts's job.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { openSync, readFileSync, statSync, closeSync, readSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { evaluateProof, isHumanGap, softwareCursorEvidence } from '../../lib/proof-window.mjs';
+
+// Re-export so every existing `import { softwareCursorEvidence } from sampler.mjs` caller keeps
+// working while the implementation lives in exactly one place (proof-window). This is not a copy:
+// it is the same function object, re-named.
+export { softwareCursorEvidence };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const STATE = join(homedir(), '.dsh', 'windows-parallel-mcp');
@@ -80,69 +86,22 @@ export function killEarly(s) { try { s.child.kill(); } catch {} }
 // human touched the mouse or keyboard inside the gap and any cursor delta there belongs
 // to the human, not to the software under test.
 export function summarize(rows) {
-  const r = rows.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  if (r.length < 2) return { samples: r.length, error: 'insufficient samples' };
-  const lii = (x) => (typeof x.inputAgeMs === 'number' && x.inputAgeMs >= 0 ? x.ts - x.inputAgeMs : null);
-  let maxD = 0, maxAt = r[0].ts, total = 0;
-  let fg = 0, fc = 0, unexplained = 0, unexplainedMax = 0, unexplainedMaxAt = 0;
-  let physEvents = 0, humanMs = 0, quietMs = 0, unexplainedFg = 0, unexplainedFc = 0;
+  // The judgment is proof-window's, not a second copy here. This module's job is only the I/O
+  // contract: read the sampler's lines, JSON-parse them, and hand a clean array to the single
+  // truth. When the math lived inline, reach-matrix and baseline-mcp shared this file but the
+  // per-action engine path had its own -- and a drift between them is precisely the bug this
+  // header warned about, now removed at the root.
+  const parsed = rows.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const s = evaluateProof(parsed, { minSamples: 2 });
   const fgEvents = [];
-  for (let i = 1; i < r.length; i++) {
-    const a = r[i], b = r[i - 1];
-    const gap = a.ts - b.ts;
-    const ea = lii(b), eb = lii(a);
-    const human = ea !== null && eb !== null && eb > ea + Math.max(2, gap * 0.6);
-    if (human) { physEvents++; humanMs += gap; } else quietMs += gap;
-
-    const dx = a.cx - b.cx, dy = a.cy - b.cy;
-    const d = Math.hypot(dx, dy);
-    if (d > maxD) { maxD = d; maxAt = a.ts; }
-    total += d;
-    if (!human && d > 0.5) { unexplained += d; if (d > unexplainedMax) { unexplainedMax = d; unexplainedMaxAt = a.ts; } }
-
-    if (a.fg !== b.fg) {
-      fg++; if (!human) unexplainedFg++;
-      fgEvents.push({ at: a.ts, from: b.fg, to: a.fg, human, gapMs: gap });
+  for (let i = 1; i < parsed.length; i++) {
+    if (parsed[i].fg !== parsed[i - 1].fg) {
+      const gap = parsed[i].ts - parsed[i - 1].ts;
+      const human = isHumanGap(parsed[i - 1], parsed[i]);
+      fgEvents.push({ at: parsed[i].ts, from: parsed[i - 1].fg, to: parsed[i].fg, human, gapMs: gap });
     }
-    if (a.focus !== b.focus) { fc++; if (!human) unexplainedFc++; }
   }
-  const round = (v) => Math.round(v * 100) / 100;
-  return {
-    samples: r.length,
-    windowMs: r[r.length - 1].ts - r[0].ts,
-    cursorMaxDeltaPx: round(maxD),
-    cursorMaxDeltaAt: maxAt,
-    cursorTotalPathPx: round(total),
-    foregroundSwitches: fg,
-    focusChanges: fc,
-    attribution: {
-      physicalInputEvents: physEvents,
-      humanActiveMs: humanMs,
-      quietMs,
-      unexplainedCursorMaxDeltaPx: round(unexplainedMax),
-      unexplainedCursorMaxDeltaAt: unexplainedMaxAt,
-      unexplainedCursorPathPx: round(unexplained),
-      unexplainedForegroundSwitches: unexplainedFg,
-      unexplainedFocusChanges: unexplainedFc,
-    },
-    foregroundEvents: fgEvents.slice(0, 25),
-    first: r[0],
-    last: r[r.length - 1],
-  };
-}
-
-// Cursor movement attributable to software, i.e. with no physical input in the same gap.
-// R2.3 forbids exactly this quantity; the raw cursor delta cannot be the test, because a
-// human is allowed to move the mouse during a proof run.
-export function softwareCursorEvidence(summary) {
-  const a = (summary && summary.attribution) || {};
-  return {
-    maxPx: a.unexplainedCursorMaxDeltaPx ?? null,
-    pathPx: a.unexplainedCursorPathPx ?? null,
-    foregroundSwitches: a.unexplainedForegroundSwitches ?? null,
-    focusChanges: a.unexplainedFocusChanges ?? null,
-    quietMs: a.quietMs ?? null,
-  };
+  return { ...s, foregroundEvents: fgEvents.slice(0, 25), first: parsed[0], last: parsed[parsed.length - 1] };
 }
 
 // One-shot GetLastInputInfo read. NOT used by the baseline driver: spawning PowerShell

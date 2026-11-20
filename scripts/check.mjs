@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const roots = ['scripts', 'src', 'test', 'worker'].filter((r) => {
+const roots = ['scripts', 'src', 'test', 'worker', 'lib'].filter((r) => {
   try { return statSync(r).isDirectory(); } catch { return false; }
 });
 
@@ -76,6 +76,18 @@ pass = run('tool schema contract', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// THE CENTRAL CLAIM'S TEST. "Driving a window never disturbs the owner" is the whole reason the
+// product exists, and it is only real if the attribution arithmetic is pinned against windows whose
+// answer is known by construction -- including cases that FAIL, so a 'pass' cannot be a constant.
+// This is the one gate that needs no desktop at all (pure synthetic samples), so it costs ~50ms and
+// runs even when the human is working. It found two of its own test-authoring bugs (metric mixup
+// between per-gap max and total path; a snap-back that was software motion masquerading as human).
+pass = run('proof attribution (pure, synthetic windows)', () => {
+  const r = spawnSync(process.execPath, ['test/proof-window-test.mjs'], { encoding: 'utf8' });
+  const tail = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(-1)[0] || '(no output)';
+  return { ok: r.status === 0, out: tail };
+}) && pass;
+
 // The package that gets installed is the product. A missing engine file or a swept-in .tmp/ both
 // install cleanly and fail later, so the tarball is checked here rather than discovered at install.
 pass = run('package tarball contents', () => {
@@ -124,7 +136,7 @@ pass = run('overlay promises (desktop, STA)', () => {
 pass = run('marker end-to-end (real click, independent oracle)', () => {
   const r = spawnSync(process.execPath, ['test/marker-e2e.mjs'], { encoding: 'utf8', timeout: 180000 });
   const lines = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').map((l) => l.trim()).filter(Boolean);
-  const notable = lines.filter((l) => /^(FAIL|WARN)/.test(l));
+  const notable = lines.filter((l) => /^(FAIL|WARN|SKIP|INFO)/.test(l));
   const tail = lines.filter((l) => /passed,/.test(l)).slice(-1)[0] || lines.slice(-1)[0] || '(no output)';
   return { ok: r.status === 0, out: notable.length ? `${tail} | ${notable.join(' | ')}` : tail };
 }) && pass;
