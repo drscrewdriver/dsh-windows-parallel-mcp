@@ -250,12 +250,15 @@ function Start-WpmOverlay {
 function Get-WpmOverlayState {
   param([int]$WaitMs = 2500)
   # THE READINESS FLAG MUST BE THE FLAG THE VERDICT USES. The first version polled OverlayHwnd --
-  # set right after Show() -- but reported `running = OverlayOn`, set only after the trio, the hotkey
-  # and the pump are all up. In the window between those two assignments the state said
-  # "overlay reported not running" about an overlay that was initialising, and the caller's marker
-  # request was skipped for a click that had already answered (measured intermittently: the e2e's
-  # coverage arm read the parked (-2000,-2000) marker exactly this way). So: wait for OverlayOn; a
-  # hwnd WITHOUT OverlayOn is not 'ready' and not 'failed' either -- it says which stage it is in.
+  # set right after Show(), BEFORE the ex-style trio is applied -- but reported `running = OverlayOn`,
+  # set only after the trio, the hotkey and the pump are all up. Inside that window the state read
+  # back a HALF-STYLED window (measured: exStyle=0x00080008 -- WPF's own TOPMOST|LAYERED, no
+  # TRANSPARENT) and declared an initialising overlay "not running"; the caller's marker request was
+  # then skipped for a click that had already answered, and the fire-and-forget path never retried
+  # (measured in the gate: marker parked at (-2000,-2000) with one WARN, then silence forever).
+  # So: wait for OverlayOn -- the same flag the verdict reports. A budget that merely EXPIRED is a
+  # third state, not a crash: `starting` below, from the runspace handle, keeps "slow" and "dead for
+  # a named reason" from sharing one message.
   $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + $WaitMs
   while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadline -and -not [WpmCtl]::OverlayOn) {
     Start-Sleep -Milliseconds 50

@@ -1,10 +1,10 @@
 # dsh-windows-parallel-mcp
 
-> **0.1.1 — first usable package.** The name was reserved earlier under a weaker claim (see
-> [CHANGELOG.md](CHANGELOG.md)); the claim below is the measured one. See
-> [What measurement established](#what-measurement-established) for what did **not** survive.
-> 0.1.1 is 0.1.0's behaviour with a corrected packaging chain — same product, and now the artifact
-> you install hashes the same as the repository it came from.
+> **0.1.2 — every real click now carries its own disturbance proof.** The name was reserved earlier
+> under a weaker claim (see [CHANGELOG.md](CHANGELOG.md)); the claim below is the measured one.
+> 0.1.1 is 0.1.0's behaviour with a corrected packaging chain; 0.1.2 adds the runtime proof chain —
+> `wpm click` returns a `proof=` verdict and `proofDimensions`, measured against the desktop around
+> your own call.
 
 A DSH plugin that lets an agent drive **its own** Windows windows without moving your cursor. Where
 a window accepts a window message, you never lose focus at all. Where it only exposes UI Automation,
@@ -57,6 +57,20 @@ flag itself is engine-side and refuses actions with `paused`.
 Refusals are a normal result, not an error: `no_hwnd`, `paused`, `elevated_target`, `unreachable`,
 `terminal_no_door`, `needs_facts`, `action_failed`, `restore_failed`. Each carries a reason and a
 next step — see [docs/refusals.md](docs/refusals.md).
+
+**Every real click carries its own disturbance proof.** `click` returns a `proof=pass|inconclusive|…`
+verdict plus a `proofDimensions` field (cursor / foreground / focus). Around your call the engine
+samples cursor position, foreground window, keyboard focus and last-physical-input age — in a short
+pre-action control window (when, by construction, nothing was running) and inside the settle wait it
+already pays. The judgment is one pure function (`lib/proof-window.mjs`, unit-tested against 32
+synthetic windows whose answers are known by construction). What it honestly can and cannot say:
+a switch of foreground on a quiet tier fails — the control shows the desktop was not doing it, so it
+is the action's to explain; a cursor jump is *reported*, never accused, because with nothing running
+this desktop's cursor showed multi-gap unexplained motion on its own (a re-runnable probe ships:
+`scripts/idle-baseline.mjs`). The cursor promise therefore lives where blame is decidable: a build
+gate asserts no shipped file contains `SetCursorPos`/`SendInput`/`mouse_event`/`keybd_event`, so a
+regression that adds cursor control fails at build time with certainty instead of being hunted at
+runtime among ambient motion.
 
 ## What it does not do
 
