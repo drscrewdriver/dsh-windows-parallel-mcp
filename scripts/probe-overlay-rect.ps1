@@ -7,7 +7,7 @@
 # in the same physical-pixel space the click used.
 #
 # Exit 0 and one JSON line when found, exit 1 with {"found":false} when not.
-param([string]$Title = 'WpmOverlay')
+param([string]$Title = 'WpmOverlay', [string]$Hwnd = '')
 $ErrorActionPreference = 'Stop'
 # THIS ORACLE MUST BE DPI AWARE FOR THE SAME REASON THE ENGINE IS. An unaware PowerShell process
 # gets every coordinate virtualised by Windows, so it reported the marker at (459,399) while the
@@ -53,7 +53,21 @@ if ($hits.Count -eq 0) {
   '{"found":false}'
   exit 1
 }
-$h = $hits[0]
+# ANCHOR WHEN GIVEN. $Hwnd is the overlay handle the product itself reported via status. Title
+# matching alone can hit a leaked overlay from a previous run (or anyone else's window with the
+# same caption); grading THAT would certify a marker we never placed. With an anchor, we pick our
+# own window and report ambiguity openly when the desktop has more than one.
+$ambiguous = ($hits.Count -gt 1)
+$h = $null
+if ($Hwnd -ne '') {
+  foreach ($cand in $hits) { if ([int64]$cand -eq [int64]$Hwnd) { $h = $cand; break } }
+  if ($null -eq $h) {
+    (@{ found = $false; notOurs = $true; wantedHwnd = [int64]$Hwnd; seenTitles = $hits.Count } | ConvertTo-Json -Compress)
+    exit 1
+  }
+} else {
+  $h = $hits[0]
+}
 $r = New-Object 'OvProbe+RECT'
 [void][OvProbe]::GetWindowRect($h, [ref]$r)
 # NOT $pid: that is a read-only automatic variable in PowerShell, and assigning it fails with
@@ -64,6 +78,7 @@ $ex = [OvProbe]::GetWindowLong($h, -20)
 $o = [ordered]@{
   found = $true
   hwnd = [int64]$h
+  ambiguous = $ambiguous
   pid = [int]$ownerPid
   left = $r.Left; top = $r.Top; right = $r.Right; bottom = $r.Bottom
   width = $r.Right - $r.Left; height = $r.Bottom - $r.Top

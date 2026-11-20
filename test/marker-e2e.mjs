@@ -35,9 +35,20 @@ function ok(name, condition, detail = '') {
   else { failures.push(name); console.log(`  FAIL  ${name}${detail ? ` :: ${detail}` : ''}`); }
 }
 
+// The product's OWN reported overlay hwnd, once status shows the overlay on. The oracle anchors on
+// it: a title match alone could grade a leaked WpmOverlay from an earlier run, and certifying that
+// window's trio/coverage would be grading homework from another class. Empty = unanchored fallback.
+let overlayHwnd = '';
+function readOverlayHwnd(text) {
+  const m = /overlayHwnd=(\d+)/.exec(text || '');
+  if (m && m[1] !== '0') overlayHwnd = m[1];
+  return overlayHwnd;
+}
 function probeMarker() {
-  const r = spawnSync(PS, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-    '-File', join(ROOT, 'scripts', 'probe-overlay-rect.ps1')], { encoding: 'utf8', timeout: 30000 });
+  const argv = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', join(ROOT, 'scripts', 'probe-overlay-rect.ps1')];
+  if (overlayHwnd) argv.push('-Hwnd', overlayHwnd);
+  const r = spawnSync(PS, argv, { encoding: 'utf8', timeout: 30000 });
   const line = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').filter(Boolean).pop() || '{}';
   try { return JSON.parse(line); } catch { return { found: false, raw: line }; }
 }
@@ -137,18 +148,22 @@ if (targetHwnd) {
     // the parked -2000 position on a cold overlay -- a timing miss, not the product, and the same
     // flake overlay-test already learned to poll past. So POLL for coverage within a bounded window
     // and keep the BEST sample; if it is still parked after the window the arm fails for real.
+    // Anchor the oracle on the window the PRODUCT says is its overlay, from the very next status.
+    readOverlayHwnd((await tool.execute({ action: 'status' })).text);
     let mk = probeMarker();
     const coverDeadline = Date.now() + 1600;
     const coversAt = (m) => m.found && clickPoint.x >= m.left && clickPoint.x <= m.right
       && clickPoint.y >= m.top && clickPoint.y <= m.bottom;
     while (!coversAt(mk) && Date.now() < coverDeadline) {
       await new Promise((r) => setTimeout(r, 100));
+      if (!overlayHwnd) readOverlayHwnd((await tool.execute({ action: 'status' })).text);
       const probe = probeMarker();
       if (probe.found && !mk.found) mk = probe;          // take the first window that appears
       else if (coversAt(probe)) mk = probe;               // and stop as soon as it covers
       else if (mk.found && probe.left > mk.left) mk = probe; // keep the most-placed sample
     }
     const fgAfter = await tool.execute({ action: 'status' });
+    readOverlayHwnd(fgAfter.text);   // late anchor: if the first status raced the start, take the hwnd now
 
     ok('the click through the shipped plugin succeeded', clicked.ok === true && !clicked.refusal,
       `${clicked.text?.slice(0, 200)}`);
@@ -189,6 +204,9 @@ if (targetHwnd) {
       + (d.cursor ? ` [cursor=${d.cursor} fg=${d.foreground} focus=${d.focus}]` : '')
       + ` :: ${(clicked.text || '').split(/proof=\w+\(/)[1]?.slice(0, 120) || ''}`);
     ok('a window titled WpmOverlay exists after the click', mk.found === true, JSON.stringify(mk).slice(0, 240));
+    // Two WpmOverlay windows on one desktop means one is leaked (ours or someone else's); grading a
+    // random pick of them would certify noise. Named here instead of silently averaged away.
+    if (mk.found && mk.ambiguous) console.log('  WARN  more than one WpmOverlay window exists on the desktop (a leak); anchored on the product-reported hwnd');
     if (mk.found) {
       ok('the marker carries the trio (TOPMOST|NOACTIVATE|TRANSPARENT)',
         mk.topmost === true && mk.noActivate === true && mk.transparent === true, mk.exStyle);

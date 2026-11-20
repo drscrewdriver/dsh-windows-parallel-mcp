@@ -44,6 +44,7 @@ function Get-WpmStatus {
     # whether the hotkey actually registered. A silent 'overlay off' would make the README's
     # Ctrl+Alt+Q promise untrue with no way to notice.
     overlayRunning = [bool][WpmCtl]::OverlayOn
+    overlayHwnd = [string][WpmCtl]::OverlayHwnd
     hotkeyRegistered = [bool][WpmCtl]::HotkeyOk
     hotkeyLabel = [string][WpmCtl]::HotkeyLabel
     overlayReason = [string][WpmCtl]::Reason

@@ -249,15 +249,27 @@ function Start-WpmOverlay {
 
 function Get-WpmOverlayState {
   param([int]$WaitMs = 2500)
+  # THE READINESS FLAG MUST BE THE FLAG THE VERDICT USES. The first version polled OverlayHwnd --
+  # set right after Show() -- but reported `running = OverlayOn`, set only after the trio, the hotkey
+  # and the pump are all up. In the window between those two assignments the state said
+  # "overlay reported not running" about an overlay that was initialising, and the caller's marker
+  # request was skipped for a click that had already answered (measured intermittently: the e2e's
+  # coverage arm read the parked (-2000,-2000) marker exactly this way). So: wait for OverlayOn; a
+  # hwnd WITHOUT OverlayOn is not 'ready' and not 'failed' either -- it says which stage it is in.
   $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + $WaitMs
-  while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadline -and [WpmCtl]::OverlayHwnd -eq 0) {
-    Start-Sleep -Milliseconds 100
+  while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadline -and -not [WpmCtl]::OverlayOn) {
+    Start-Sleep -Milliseconds 50
   }
   $hwnd = [WpmCtl]::OverlayHwnd
   $ex = 0
   if ($hwnd -ne 0) { $ex = [WpmWin]::GetWindowLong([IntPtr]$hwnd, [WpmWin]::GWL_EXSTYLE) }
   return @{
     running = [bool][WpmCtl]::OverlayOn
+    # A timeout is not a crash, and the caller must be able to tell them apart. Before this, a
+    # wait that expired mid-init produced `running=false` with an empty reason -- indistinguishable
+    # from a body that threw. 'starting' names the third state: still alive, just not done.
+    starting = (-not [WpmCtl]::OverlayOn) -and ($script:WpmOvHandle -ne $null) -and
+               (-not $script:WpmOvHandle.AsyncWaitHandle.WaitOne(0))
     hwnd = [string]$hwnd
     hotkeyRegistered = [bool][WpmCtl]::HotkeyOk
     hotkeyLabel = [string][WpmCtl]::HotkeyLabel

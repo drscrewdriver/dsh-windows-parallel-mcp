@@ -92,10 +92,11 @@ while ($true) {
         $on = [bool](Get-Arg $req 'on' $true)
         if ($on) {
           $r = Start-WpmOverlay
-          # Cold-start allowance: the overlay runspace JITs PresentationFramework on first use.
-          # Measured: the hwnd can stay absent past 2.5s on a cold worker and the caller then reads
-          # 'overlay reported not running' -- a false failure of a surface that comes up a beat later.
-          $st = Get-WpmOverlayState -WaitMs 6000
+          # The handshake now waits for the SAME flag the verdict reports (OverlayOn, not the hwnd)
+          # and says 'starting' when the budget merely expired -- so it can stay short and honest.
+          # Patience above a genuinely slow start lives in the Node half's placement retry loop,
+          # where a stop condition exists; a worker-side sleep cannot name one.
+          $st = Get-WpmOverlayState -WaitMs 2500
         } else {
           $r = Stop-WpmOverlay
           $st = $r.state
