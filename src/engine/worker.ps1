@@ -84,6 +84,32 @@ while ($true) {
         $st = Get-WpmStatus
         Write-Response $id @{ id = $id; ok = $true; result = $st }
       }
+      'overlay' {
+        # Product surface (task_54): the marker + Ctrl+Alt+Q. `on` starts/stops the overlay thread;
+        # `x`/`y` move the marker to the point the engine just acted on (the Node half calls this
+        # after a successful action; the marker auto-hides).
+        . (Join-Path $EngineRoot 'overlay.ps1')
+        $on = [bool](Get-Arg $req 'on' $true)
+        if ($on) {
+          $r = Start-WpmOverlay
+          $st = Get-WpmOverlayState -WaitMs 2500
+        } else {
+          $r = Stop-WpmOverlay
+          $st = $r.state
+        }
+        $mx = [int](Get-Arg $req 'x' -1)
+        $my = [int](Get-Arg $req 'y' -1)
+        if ($on -and $mx -ge 0 -and $my -ge 0) { [void](Set-WpmOverlayMarker -X $mx -Y $my) }
+        Write-Response $id @{ id = $id; ok = $true; result = @{ start = $r; state = $st } }
+      }
+      'marker' {
+        . (Join-Path $EngineRoot 'overlay.ps1')
+        $mx = [int](Get-Arg $req 'x' -1)
+        $my = [int](Get-Arg $req 'y' -1)
+        $hide = [bool](Get-Arg $req 'hide' $false)
+        $r = Set-WpmOverlayMarker -X $mx -Y $my -Hide:$hide
+        Write-Response $id @{ id = $id; ok = $true; result = $r }
+      }
       'pause' {
         # Owner control. Kept in the worker rather than in Node so the pause flag lives in exactly
         # one process: two copies would let a model bypass the pause by reaching whichever copy
