@@ -22,8 +22,8 @@ To install from a local build, pack first and install the tarball -- this is als
 profile's other local-development plugins are mounted, and it matters for more than tidiness:
 
 ```bash
-npm pack --ignore-scripts                       # -> dsh-windows-parallel-mcp-0.1.0.tgz
-dsh plugin --profile <profile> add /abs/path/to/dsh-windows-parallel-mcp-0.1.0.tgz
+npm pack --ignore-scripts                       # -> dsh-windows-parallel-mcp-0.1.1.tgz
+dsh plugin --profile <profile> add /abs/path/to/dsh-windows-parallel-mcp-0.1.1.tgz
 ```
 
 A `link:` install keeps the package's REAL path outside the profile tree, and Node resolves bare

@@ -1,8 +1,10 @@
 # dsh-windows-parallel-mcp
 
-> **0.1.0 — first usable package.** The name was reserved earlier under a weaker claim; the claim
-> below is the measured one. See [What measurement established](#what-measurement-established) for
-> what did **not** survive.
+> **0.1.1 — first usable package.** The name was reserved earlier under a weaker claim (see
+> [CHANGELOG.md](CHANGELOG.md)); the claim below is the measured one. See
+> [What measurement established](#what-measurement-established) for what did **not** survive.
+> 0.1.1 is 0.1.0's behaviour with a corrected packaging chain — same product, and now the artifact
+> you install hashes the same as the repository it came from.
 
 A DSH plugin that lets an agent drive **its own** Windows windows without moving your cursor. Where
 a window accepts a window message, you never lose focus at all. Where it only exposes UI Automation,

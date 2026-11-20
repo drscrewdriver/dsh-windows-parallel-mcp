@@ -1,6 +1,10 @@
 {
   "name": "dsh-windows-parallel-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest"
+  },
   "description": "Drive a Windows window without moving the cursor or stealing the keyboard: one tool, five actions, a channel decision table that prefers the quiet door, and a bounded self-reversing focus flash when only UI Automation can reach the control. Windows PowerShell 5.1 sidecar, zero install dependencies, no synthetic input.",
   "keywords": [
     "deepseek",
@@ -28,6 +32,7 @@
     "src/engine/",
     "src/schema/",
     "docs/refusals.md",
+    "CHANGELOG.md",
     "cordis.patch.yml",
     "dsh.plugin.json",
     "INSTALL.md",
