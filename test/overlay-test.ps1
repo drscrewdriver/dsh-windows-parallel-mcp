@@ -107,8 +107,57 @@ Assert-Ov 'marker is actually parked on the hit-test point' $covers `
   ("marker rect=({0},{1} {2}x{3}) point=({4},{5}) err='{6}'" -f $mk.left, $mk.top, $mk.width, $mk.height, $px, $py, $mk.reason)
 $hit = [WpmWin]::WindowFromPoint((New-Object 'WpmWin+POINT' -Property @{ X = $px; Y = $py }))
 $hitRoot = if ($hit -ne [IntPtr]::Zero) { [WpmWin]::Root($hit) } else { [IntPtr]::Zero }
-Assert-Ov 'click at the marker lands on the window UNDERNEATH' ($hitRoot -eq $base) `
-  ("hit={0} root={1} base={2}" -f [int64]$hit, [int64]$hitRoot, [int64]$base)
+
+# THE PREMISE OF THIS ARM, RESTORED AND THEN PROVED. Two things must both hold for "a click at the
+# marker lands on the window UNDERNEATH" to mean anything:
+#   (a) the marker is ABOVE the base in z-order at that point -- otherwise the arm measures nothing;
+#   (b) WindowFromPoint still returns the base.
+# A third-party full-screen window (measured live: PotPlayer owned the test points) breaks both: it
+# sits above the base, so (a) fails and (b) names the occluder -- and an engine that refuses to act
+# under a window it was not given would ALSO refuse here, which is correct behaviour, not a defect.
+# So: raise OUR OWN base into the topmost band (HWND_TOPMOST + SWP_NOACTIVATE -- z-order only,
+# GetForegroundWindow untouched, the same mechanism the overlay itself claims), then re-raise the
+# MARKER so it ends up back above the base, then verify (a) from the one source that states z-order
+# plainly: EnumWindows walks top-level windows top-to-bottom. Only then is (b) a real measurement.
+# If any step cannot be established, the arm SKIPs with the reason and the occluder named. A desktop
+# this test does not control must never read as a red against the plugin.
+function Get-WpmZIndex([long]$Target) {
+  # Same scope rule as Find-WpmWindow: no GetNewClosure -- a closure snapshot rebinds $script: and
+  # the accumulator writes into a copy the caller cannot read. The needle travels by script scope.
+  $script:WpmZNeedle = $Target
+  $script:WpmZIdx = -1
+  $script:WpmZCount = 0
+  $cb = [WpmWin+EnumProc] {
+    param([IntPtr]$h, [IntPtr]$l)
+    if ([int64]$h -eq $script:WpmZNeedle) { $script:WpmZIdx = $script:WpmZCount }
+    $script:WpmZCount++
+    return $true
+  }
+  [void][WpmWin]::EnumWindows($cb, [IntPtr]::Zero)
+  return $script:WpmZIdx
+}
+if ($hitRoot -ne $base) {
+  [void][WpmWin]::MakeTopmostNoActivate($base)
+  $ovH = [Int64]$st.hwnd
+  if ($ovH -ne 0) { [void][WpmWin]::MakeTopmostNoActivate([IntPtr]$ovH) }  # marker last => above base
+  Start-Sleep -Milliseconds 250
+  $hit = [WpmWin]::WindowFromPoint((New-Object 'WpmWin+POINT' -Property @{ X = $px; Y = $py }))
+  $hitRoot = if ($hit -ne [IntPtr]::Zero) { [WpmWin]::Root($hit) } else { [IntPtr]::Zero }
+}
+$zBase = Get-WpmZIndex ([int64]$base)
+$zMark = Get-WpmZIndex ([Int64]$st.hwnd)
+if ($zMark -lt 0 -or $zBase -lt 0 -or $zMark -ge $zBase) {
+  $skip++
+  "  SKIP  click-through: cannot establish the marker sits above the base (marker z=$zMark base z=$zBase; EnumWindows is top-to-bottom) -- the arm's premise does not hold right now"
+} elseif ($hitRoot -ne $base -and $hitRoot -ne [IntPtr]::Zero) {
+  $skip++
+  "  SKIP  click-through: point ($px,$py) is owned by hwnd $([int64]$hitRoot) '$([WpmWin]::Txt($hitRoot))' even after raising the base -- not ours to measure"
+} else {
+  Assert-Ov 'marker is above the base in z-order (EnumWindows top-to-bottom)' ($zMark -lt $zBase) `
+    ("markerZ={0} baseZ={1}" -f $zMark, $zBase)
+  Assert-Ov 'click at the marker lands on the window UNDERNEATH' ($hitRoot -eq $base) `
+    ("hit={0} root={1} base={2}" -f [int64]$hit, [int64]$hitRoot, [int64]$base)
+}
 
 # 4: WM_HOTKEY -> pause flip -> decision table refuses.
 $st2 = Get-WpmOverlayState -WaitMs 200

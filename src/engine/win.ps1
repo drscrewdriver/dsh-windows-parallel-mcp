@@ -216,6 +216,25 @@ public static class WpmWin
         return SetWindowPos(h, IntPtr.Zero, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
+    /// <summary>
+    /// Put THIS window at the top of the topmost band without activating it. Exists for the desktop
+    /// test arms, which assert facts about a screen point ("WindowFromPoint at the marker returns my
+    /// base"; "the click lands on my target's button"). A third-party full-screen window -- a video
+    /// player that went fullscreen while these lines were written (measured live: PotPlayer owned every
+    /// test point) -- makes WindowFromPoint return the OCCLUDER. When that happens the ENGINE IS RIGHT
+    /// to refuse: it must never act under a window the caller did not name. What broke is the arm's
+    /// PREMISE, not the product. Raising the test's OWN window into the topmost band uses the same
+    /// mechanism the overlay relies on (HWND_TOPMOST + SWP_NOACTIVATE): z-order changes,
+    /// GetForegroundWindow does not. This is a test-support primitive, NOT a product surface -- there is
+    /// no reason to let a model topmost-raise arbitrary windows, so no such action exists in
+    /// tools.json; scripts/raise-topmost.ps1 is the only product-adjacent caller and it is a test
+    /// helper under scripts/, not exposed through wpm.
+    /// </summary>
+    public static bool MakeTopmostNoActivate(IntPtr h) {
+        // SWP_NOMOVE(0x2) | SWP_NOSIZE(0x1) | SWP_NOACTIVATE(0x10), insert after HWND_TOPMOST(-1).
+        return SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, 0x2u | 0x1u | 0x10u);
+    }
+
     /// <summary>Add ex-style bits and return the new value (the trio lives here, once).</summary>
     public static int AddExStyles(IntPtr h, int bits) {
         int v = GetWindowLong(h, GWL_EXSTYLE);

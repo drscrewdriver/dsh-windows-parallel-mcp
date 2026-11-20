@@ -28,6 +28,7 @@ const PS = process.env.SystemRoot
   : 'powershell.exe';
 
 let pass = 0;
+let skips = 0;
 const failures = [];
 function ok(name, condition, detail = '') {
   if (condition) { pass += 1; console.log(`  PASS  ${name}`); }
@@ -68,11 +69,22 @@ ok('the WinForms target is drivable', Boolean(targetHwnd), targetHwnd || 'never 
 
 let clickPoint = null;
 let clicked = null;
+let premiseBroken = '';
+
+function probeHit(x, y) {
+  const r = spawnSync(PS, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', join(ROOT, 'scripts', 'probe-hit.ps1'), '-X', String(x), '-Y', String(y)],
+  { encoding: 'utf8', timeout: 30000 });
+  try { return JSON.parse(((r.stdout || '').trim().split('\n').filter(Boolean).pop()) || '{}'); } catch { return {}; }
+}
+function raiseTopmost(hwnd) {
+  const r = spawnSync(PS, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', join(ROOT, 'scripts', 'raise-topmost.ps1'), '-Hwnd', String(hwnd)],
+  { encoding: 'utf8', timeout: 30000 });
+  return (r.stdout || '').includes('raised=True');
+}
+
 if (targetHwnd) {
-  const probe = spawnSync(PS, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-    `$w = Get-Process -Id ${target.pid} -ErrorAction SilentlyContinue; if ($w) { $null }`],
-  { encoding: 'utf8' });
-  void probe;
   // Click the target's own centre: a WinForms form always has a client area there, and the engine
   // resolves the deepest child under the point itself.
   const wins = await tool.execute({ action: 'windows' });
@@ -82,7 +94,24 @@ if (targetHwnd) {
     const [l, t, r, b] = [Number(rect[1]), Number(rect[2]), Number(rect[3]), Number(rect[4])];
     clickPoint = { x: Math.round((l + r) / 2), y: Math.round((t + b) / 2) };
   }
+  // RESTORE THE ARM'S PREMISE BEFORE MEASURING. A third-party full-screen window (measured live:
+  // PotPlayer) owns screen points and then WindowFromPoint returns the occluder -- and the engine
+  // REFUSING to act under a window the caller did not name is correct behaviour, not a defect.
+  // Raising our own target into the topmost band (z-order only, never the foreground) re-earns the
+  // premise through the same mechanism the overlay claims. If the point is still foreign, the click
+  // arms SKIP with the occluder named; a desktop this test does not control must not read as red.
   if (clickPoint) {
+    let hit = probeHit(clickPoint.x, clickPoint.y);
+    if (String(hit.root) !== String(targetHwnd)) {
+      raiseTopmost(targetHwnd);
+      await new Promise((r) => setTimeout(r, 250));
+      hit = probeHit(clickPoint.x, clickPoint.y);
+    }
+    if (String(hit.root) !== String(targetHwnd)) {
+      premiseBroken = `point (${clickPoint.x},${clickPoint.y}) owned by hwnd ${hit.root} '${hit.rootTitle || '?'}' even after raising`;
+    }
+  }
+  if (clickPoint && !premiseBroken) {
     const fgBefore = await tool.execute({ action: 'status' });
     clicked = await tool.execute({ action: 'click', hwnd: targetHwnd, x: clickPoint.x, y: clickPoint.y });
     // the marker is fired after the action resolves; give the pump two frames plus slack
@@ -92,6 +121,20 @@ if (targetHwnd) {
 
     ok('the click through the shipped plugin succeeded', clicked.ok === true && !clicked.refusal,
       `${clicked.text?.slice(0, 200)}`);
+    // THE PROOF rides along with a real click. This is the payoff of the whole chain: a genuine
+    // click through the SHIPPED plugin must carry its own disturbance measurement and pass it. If
+    // the engine stopped sampling, or the attribution defaulted to 'pass' on no data, this arm goes
+    // red -- which is the point. (verdict 'pass' means no software-attributable cursor/fg/focus
+    // change inside the settle window; 'fail' here would mean the act of clicking DID disturb the
+    // owner, the exact thing the product promises not to do.)
+    ok('the click carried a proof verdict', typeof clicked.proof === 'string' && clicked.proof.length > 0,
+      `proof=${clicked.proof} text=${clicked.text?.slice(0, 200)}`);
+    ok('PROOF: the real click did not disturb the owner', clicked.proof === 'pass',
+      `proof=${clicked.proof} :: ${clicked.text?.slice(0, 260)}`);
+    // Surface the MEASURED floor every run. The number is the evidence; a silent PASS tells a
+    // reviewer nothing about what was actually tolerated, and a floor that crept up to 40px would
+    // look identical to 0px if nobody printed it. check.mjs shows INFO lines.
+    console.log(`  INFO  ${(clicked.text || '').split(' ').find((b) => b.startsWith('proof=')) || 'proof absent'}`);
     ok('a window titled WpmOverlay exists after the click', mk.found === true, JSON.stringify(mk).slice(0, 240));
     if (mk.found) {
       ok('the marker carries the trio (TOPMOST|NOACTIVATE|TRANSPARENT)',
@@ -109,6 +152,14 @@ if (targetHwnd) {
     }
     void fgBefore;
   }
+}
+
+// A broken premise is a SKIP, never a red: see the long comment above the raise/probe block. The
+// click arms are counted, reported, and do not fail the suite -- but they are NOT silently dropped,
+// because an invisible skip is how "we never actually tested that" survives review.
+if (premiseBroken) {
+  skips += 1;
+  console.log(`  SKIP  click + proof arms: ${premiseBroken}`);
 }
 
 // ---- cleanup ----------------------------------------------------------------------------------
