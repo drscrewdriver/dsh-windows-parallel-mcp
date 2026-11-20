@@ -67,15 +67,18 @@ const mk = (n, over) => Array.from({ length: n }, (_, i) => ({
   ok('  the number is surfaced in the reason', String(ev.reason).includes('800'), String(ev.reason));
 }
 
-// 4. SUSTAINED multi-gap cursor motion => FAIL. The signature of cursor driving (a drag/sweep), which
-//    no single ambient position correction produces. Structure, not size, is the trigger.
+// 4. MULTI-GAP cursor motion => INCONCLUSIVE, not fail. This reversal is measured, not conceded:
+//    the idle baseline (scripts/idle-baseline.mjs) saw up to 3 unexplained gaps at 11px with NOTHING of
+//    ours running, so even structured-looking motion cannot be blamed on the action from positions.
+//    The cursor promise is enforced at build time (check-no-cursor-control.mjs); this sensor reports.
 {
   const drag = mk(20, (i) => i >= 6 ? { cx: 500 + (i - 6) * 100 } : {}); // motion across many gaps
   const ev = evaluateProof(drag);
-  ok('multi-gap cursor drag => fail', ev.verdict === 'fail',
-    JSON.stringify({ v: ev.verdict, gaps: ev.attribution?.unexplainedCursorMotionGaps }));
-  ok('  more than one unexplained motion gap', ev.attribution.unexplainedCursorMotionGaps >= 2,
+  ok('multi-gap cursor drag => inconclusive (positions cannot blame; build gate owns the promise)',
+    ev.verdict === 'inconclusive', JSON.stringify({ v: ev.verdict, gaps: ev.attribution?.unexplainedCursorMotionGaps }));
+  ok('  more than one unexplained motion gap still measured', ev.attribution.unexplainedCursorMotionGaps >= 2,
     String(ev.attribution?.unexplainedCursorMotionGaps));
+  ok('  the drag still cannot read pass', ev.verdict !== 'pass', ev.verdict);
   ok('  softwareCursorEvidence carries the gap count', softwareCursorEvidence(ev).motionGaps >= 2,
     JSON.stringify(softwareCursorEvidence(ev)));
 }
@@ -141,17 +144,35 @@ const mk = (n, over) => Array.from({ length: n }, (_, i) => ({
     JSON.stringify({ v: ev.verdict, dims: ev.dimensions }));
 }
 
-// 10. verdictFor direct: the gap-count is the cursor trigger, independent of pixel size.
+// 10. THE CURSOR DIMENSION NEVER FAILS, at any gap count or size -- this is the recorded boundary:
+//     blame belongs to the build-time no-cursor-primitive gate, measurement belongs to the sensor.
 {
-  const oneGap = { unexplainedCursorMotionGaps: 1, unexplainedCursorMaxDeltaPx: 5000, unexplainedForegroundSwitches: 0, unexplainedFocusChanges: 0, unreadableInputAgeGaps: 0 };
-  ok('one gap of 5000px => inconclusive (size alone never fails)',
-    verdictFor(oneGap, null, 20).dimensions.cursor === 'inconclusive',
-    JSON.stringify(verdictFor(oneGap, null, 20).dimensions));
-  const twoGaps = { ...oneGap, unexplainedCursorMotionGaps: 2, unexplainedCursorMaxDeltaPx: 3 };
-  ok('two gaps of 3px => fail (structure fails even at small size)',
-    verdictFor(twoGaps, null, 20).dimensions.cursor === 'fail',
-    JSON.stringify(verdictFor(twoGaps, null, 20).dimensions));
-  ok('zero gaps => pass', verdictFor({ ...oneGap, unexplainedCursorMotionGaps: 0 }, null, 20).dimensions.cursor === 'pass');
+  const base = { unexplainedCursorMaxDeltaPx: 5000, unexplainedForegroundSwitches: 0, unexplainedFocusChanges: 0, unreadableInputAgeGaps: 0 };
+  ok('1 gap 5000px => inconclusive', verdictFor({ ...base, unexplainedCursorMotionGaps: 1 }, null, 20).dimensions.cursor === 'inconclusive');
+  ok('10 gaps 3px  => inconclusive (never fail -- idle motion is multi-gap too)',
+    verdictFor({ ...base, unexplainedCursorMotionGaps: 10, unexplainedCursorMaxDeltaPx: 3 }, null, 20).dimensions.cursor === 'inconclusive');
+  ok('0 gaps => pass', verdictFor({ ...base, unexplainedCursorMotionGaps: 0 }, null, 20).dimensions.cursor === 'pass');
+}
+
+// 10b. DECLARED FLASH: the bounded-flash tier raises foreground by design and restores it after the
+//      sample window. A switch during OUR declared flash is not a secret steal; the restore table
+//      owns "never KEEP the foreground" (restore_failed). The sensor reports 'declared', passes.
+{
+  const flashAttribution = { unexplainedCursorMotionGaps: 0, unexplainedForegroundSwitches: 2,
+    unexplainedFocusChanges: 0, unreadableInputAgeGaps: 0 };
+  const undeclared = verdictFor(flashAttribution, null, 20);
+  const declared = verdictFor(flashAttribution, null, 20, { declaredFlash: true });
+  ok('foreground switch, quiet tier, clean control => fail', declared && undeclared.dimensions.foreground === 'fail',
+    JSON.stringify(undeclared.dimensions));
+  ok('same switch on the DECLARED flash tier => not failed (contract says raise-then-restore)',
+    declared.dimensions.foreground === 'declared' && declared.verdict === 'pass',
+    JSON.stringify({ d: declared.dimensions, v: declared.verdict }));
+  ok('  the switch is still REPORTED in the reason, never silently passed',
+    String(declared.reason).includes('DECLARED'), String(declared.reason));
+  // The flash tier's declared-ness must NOT excuse a focus change that isn't part of the contract:
+  const focusSteal = { ...flashAttribution, unexplainedForegroundSwitches: 0, unexplainedFocusChanges: 1 };
+  ok('focus change on the flash tier is still fail (the contract covers foreground, not a focus grab)',
+    verdictFor(focusSteal, null, 20, { declaredFlash: true }).dimensions.focus === 'fail');
 }
 
 // 11. NO CONTROL falls back conservatively, never widening: an action foreground switch with no

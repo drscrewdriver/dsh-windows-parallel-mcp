@@ -88,6 +88,19 @@ pass = run('proof attribution (pure, synthetic windows)', () => {
   return { ok: r.status === 0, out: tail };
 }) && pass;
 
+// THE CURSOR GUARANTEE, ENFORCED WHERE IT IS DECIDABLE. The runtime sensor cannot blame cursor
+// motion on our action: an idle baseline (nothing running) measured up to 3 unexplained gaps at 11px
+// on this desktop. So the promise "the real cursor never moves because of us" is enforced by the
+// SHIPPED ENGINE HAVING NO PRIMITIVE that moves it -- SetCursorPos / SendInput / mouse_event /
+// keybd_event are all absent from every engine file. Zero false positives, zero desktop dependence.
+// The gate was itself verified non-vacuous: injecting SetCursorPos into win.ps1 turns it red; removing
+// it turns it green with no residue.
+pass = run('no cursor-control primitive in the shipped engine', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-no-cursor-control.mjs'], { encoding: 'utf8' });
+  const out = ((r.stdout || '') + (r.stderr || '')).trim();
+  return { ok: r.status === 0, out: out.split('\n')[0] || '(no output)' };
+}) && pass;
+
 // The package that gets installed is the product. A missing engine file or a swept-in .tmp/ both
 // install cleanly and fail later, so the tarball is checked here rather than discovered at install.
 pass = run('package tarball contents', () => {

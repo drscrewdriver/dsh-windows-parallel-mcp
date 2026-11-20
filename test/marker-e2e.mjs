@@ -69,6 +69,7 @@ ok('the WinForms target is drivable', Boolean(targetHwnd), targetHwnd || 'never 
 
 let clickPoint = null;
 let clicked = null;
+let fgBefore = null;
 let premiseBroken = '';
 
 function probeHit(x, y) {
@@ -112,8 +113,24 @@ if (targetHwnd) {
     }
   }
   if (clickPoint && !premiseBroken) {
-    const fgBefore = await tool.execute({ action: 'status' });
+    fgBefore = await tool.execute({ action: 'status' });
     clicked = await tool.execute({ action: 'click', hwnd: targetHwnd, x: clickPoint.x, y: clickPoint.y });
+    // TOCTOU ON A DESKTOP WE DO NOT OWN. The premise was checked milliseconds ago, but a fullscreen
+    // video window (observed: PotPlayer) can move over the point BETWEEN the check and the click.
+    // The engine then correctly refuses ("no child window of the target sits under that point") --
+    // that refusal is the product behaving exactly as specified, and the test's PREMISE broke, not
+    // the product. Re-probe and, if the point is foreign now, convert the click+proof arms to a
+    // NAMED SKIP. Silently passing a refusal would hide a real breakage; failing it blames us for
+    // someone else's window. Neither: name what happened.
+    if (clicked.refusal === 'unreachable' && /sits under that point/.test(clicked.reason || clicked.text || '')) {
+      const hit2 = probeHit(clickPoint.x, clickPoint.y);
+      if (String(hit2.root) !== String(targetHwnd)) {
+        premiseBroken = `point (${clickPoint.x},${clickPoint.y}) was ours before the click but is owned by hwnd ${hit2.root} '${hit2.rootTitle || '?'}' at click time (TOCTOU occlusion; the engine's refusal is correct)`;
+        clicked = null;
+      }
+    }
+  }
+  if (clickPoint && clicked) {
     // The marker is placed ASYNCHRONOUSLY (deliberately: never on the action's critical path) and,
     // when the overlay was not already up, that placement waits behind a one-time ~875ms overlay
     // start. It then auto-hides 1500ms after placement. A single snapshot at +700ms therefore reads
