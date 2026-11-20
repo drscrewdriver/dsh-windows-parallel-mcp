@@ -119,11 +119,29 @@ const status = await tool.execute({ action: 'status' });
 ok('status reaches the engine', status.ok === true && /foreground=/.test(status.text), status.text?.slice(0, 160));
 ok('status reports a refusal-free result', status.refusal === undefined || status.refusal === '', String(status.refusal));
 
+// The control surface must be visible in the result the model and the user both read. On this
+// machine Ctrl+Alt+Q is owned by another app, so the honest answer is "unavailable or a different
+// chord" -- never a silent assertion that the documented key works.
+ok('status reports the overlay state', /\boverlay=(on|off)\b/.test(status.text), status.text?.slice(0, 240));
+ok('status reports which pause hotkey actually registered',
+  /\bpauseHotkey=(unavailable|[A-Za-z+]+)/.test(status.text), status.text?.slice(0, 240));
+
 const wins = await tool.execute({ action: 'windows' });
 ok('windows reaches the engine', wins.ok === true && wins.text.length > 0, wins.text?.slice(0, 160));
 
 // ---- refusals stay refusals -----------------------------------------------------------------
+// A REFUSED CLICK MUST NOT PLACE A MARKER, and must not start the overlay either: the marker
+// promise is "this is the point that was acted on", and there was no such point here. The overlay
+// may already be on from an earlier run, so the invariant asserted is "this call did not CHANGE
+// it" -- read before, read after, compare. (An `off || on` assertion would have been unfalsifiable;
+// the first version of this block was exactly that and is why it is written as a comparison.)
+const beforeDead = await tool.execute({ action: 'status' });
+const wasOn = /\boverlay=on\b/.test(beforeDead.text);
 const deadClick = await tool.execute({ action: 'click', hwnd: '1', x: 10, y: 10 });
+const afterDeadClick = await tool.execute({ action: 'status' });
+const nowOn = /\boverlay=on\b/.test(afterDeadClick.text);
+ok('a refused click does not change the marker overlay state', wasOn === nowOn,
+  `before=${wasOn} after=${nowOn} :: ${afterDeadClick.text?.slice(0, 200)}`);
 ok('a dead hwnd is returned as a refusal, not an exception', deadClick.ok === false);
 ok('the dead-hwnd refusal carries the engine code', deadClick.refusal === 'no_hwnd', String(deadClick.refusal));
 ok('the refusal text leads with the code, so a caller can branch on it', deadClick.text.startsWith('no_hwnd'), deadClick.text);
