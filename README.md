@@ -34,6 +34,24 @@ The engine picks the cheapest available door per call:
   focus from a window you chose. Measured net return **15–95 ms** from three independent
   measurements (the 120 ms budget was never approached).
 
+## What you see while it works
+
+After a successful `click` a small marker is placed at the point that was clicked. It is a
+click-through, always-on-top window with `WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT`:
+measured that `Show()` does not change `GetForegroundWindow`, that `WindowFromPoint` at the marker's
+centre returns the window *underneath*, and that a real click through the shipped plugin puts the
+marker over the point it hit (physical pixels; the process declares DPI awareness, because using
+WPF's device-independent units put the marker at half scale on a 150% display). It hides itself
+1.5 s after the last placement. Cost: ~19 ms per placement, fired after the action has already
+answered; the first action pays a one-time ~875 ms while the overlay starts.
+
+**The pause key is not a fixed key.** `Ctrl+Alt+Q` is the first candidate, but it can already be
+owned by another app — on the machine this was measured on it was (Win32 1409), and seven of the
+other eight measured candidates were free. The engine walks a candidate list, registers the first
+free chord, and **reports what it actually registered** in `status` as `pauseHotkey=...`. It never
+silently claims the documented key works. `overlay=true` in settings controls the marker; the pause
+flag itself is engine-side and refuses actions with `paused`.
+
 Refusals are a normal result, not an error: `no_hwnd`, `paused`, `elevated_target`, `unreachable`,
 `terminal_no_door`, `needs_facts`, `action_failed`, `restore_failed`. Each carries a reason and a
 next step — see [docs/refusals.md](docs/refusals.md).
