@@ -233,6 +233,27 @@ public static class WpmWin
     public static IntPtr FgHandle() { return GetForegroundWindow(); }
     public static string Cursor() { POINT p; GetCursorPos(out p); return p.X + "," + p.Y; }
     public static uint PidOf(IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return p; }
+
+    // One proof sample: cursor x/y, foreground HWND, focused-control HWND, and the age of the last
+    // PHYSICAL input. Every read is a non-disturbing query (GetCursorPos, GetForegroundWindow,
+    // GetGUIThreadInfo, GetLastInputInfo change nothing), which is the property that makes it safe to
+    // call in a tight loop DURING an action -- unlike spawning a fresh PowerShell per poll, which can
+    // itself steal the foreground and contaminate the measured quantity (src/lib/sampler.mjs).
+    public static string[] Sample()
+    {
+        POINT cp; GetCursorPos(out cp);
+        IntPtr fg = GetForegroundWindow();
+        GUITHREADINFO g = new GUITHREADINFO();
+        g.cbSize = (uint)Marshal.SizeOf(typeof(GUITHREADINFO));
+        uint pid; uint tid = GetWindowThreadProcessId(fg, out pid);
+        long focusHwnd = 0;
+        if (GetGUIThreadInfo(tid, ref g)) focusHwnd = g.hwndFocus.ToInt64();
+        long age = LastInputAgeMs();   // the one tick-difference calculation; -1 when unreadable
+        return new string[] {
+            cp.X.ToString(), cp.Y.ToString(),
+            fg.ToInt64().ToString(), focusHwnd.ToString(), age.ToString()
+        };
+    }
     public static IntPtr Root(IntPtr h) { IntPtr r = GetAncestor(h, 2); return r == IntPtr.Zero ? h : r; }
 
     public static List<long> Children(IntPtr parent)

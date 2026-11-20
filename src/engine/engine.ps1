@@ -98,6 +98,38 @@ function Resolve-WpmChildAtPoint([IntPtr]$Hwnd, [int]$X, [int]$Y) {
   return $hit
 }
 
+function Get-WpmProofWindow {
+  <#
+    Sample cursor / foreground / focused-control / last-PHYSICAL-input-age for a fixed window.
+    Four read-only syscalls per sample, no process, so it costs nothing the engine would not already
+    pay while parked in a wait. Attribution is arithmetic and lives in lib/proof-window.mjs; this
+    only produces the raw samples. If a read throws (secure desktop, transient) we stop early and
+    return what we have -- the caller then reports 'insufficient' rather than inventing a verdict.
+    Returns an array; the leading comma keeps it an array even when there is exactly one element.
+  #>
+  param([int]$Ms, [int]$EveryMs = 15)
+  $samples = @()
+  $base = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $deadline = $base + $Ms
+  $next = $base
+  while ($true) {
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ($now -ge $deadline) { break }
+    if ($now -lt $next) { Start-Sleep -Milliseconds ([Math]::Max(1, [int]($next - $now))); continue }
+    try {
+      $s = [WpmWin]::Sample()
+      $samples += (@{ ts = $now; cx = [int]$s[0]; cy = [int]$s[1]; fg = [string]$s[2]; focus = [string]$s[3]; inputAgeMs = [long]$s[4] })
+    } catch { break }
+    $next = $now + $EveryMs
+  }
+  try {
+    $tEnd = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $s2 = [WpmWin]::Sample()
+    $samples += (@{ ts = $tEnd; cx = [int]$s2[0]; cy = [int]$s2[1]; fg = [string]$s2[2]; focus = [string]$s2[3]; inputAgeMs = [long]$s2[4] })
+  } catch { }
+  return ,$samples
+}
+
 function Invoke-WpmAction {
   param(
     [Parameter(Mandatory)][string]$Hwnd,
@@ -115,7 +147,7 @@ function Invoke-WpmAction {
     ok = $false; action = $Action; hwnd = $Hwnd; channel = ''; tier = ''
     refusal = ''; reason = ''; detail = ''; latencyMs = 0
     focusTaken = 'false'; restoreOutcome = ''; restoreSetFg = ''; restoreJoined = ''
-    effect = 'unverified'
+    effect = 'unverified'; proofSamples = @()
   }
 
   # A QUERY IS NOT AN ACTION, and this branch is early on purpose. It used to sit inside the action
@@ -170,6 +202,17 @@ function Invoke-WpmAction {
   # before-value to be falsifiable.
   $entry = Get-WpmFocusEntry
   $raisedHwnd = ''
+  # THE PRE-ACTION CONTROL WINDOW. This is sampled here, immediately BEFORE the door call is issued,
+  # so that during it, by construction, WE have done nothing. WHY A CONTROL IS REQUIRED AND NOT JUST
+  # A THRESHOLD: "unexplained motion" from GetLastInputInfo proves no PHYSICAL input happened in the
+  # gap -- it cannot tell our action apart from some background app's own timer nudging the cursor.
+  # Judging that against a hardcoded 1px is the vacuous-control trap this repo wrote down once
+  # (P0 task_5(f): "the reset control passed vacuously"). So the floor is MEASURED: whatever
+  # unexplained motion the desktop produces while we do nothing is the environment's noise floor, and
+  # the action's own window is judged against IT. A jittery background app raises the floor and a
+  # clean action still passes honestly; a desktop at rest keeps the floor ~0 and a real disturbance
+  # still fails. Kept short (80ms): a few samples, no perceptible slowdown.
+  $controlSamples = Get-WpmProofWindow -Ms 80
   $tAct = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 
   try {
@@ -257,7 +300,12 @@ function Invoke-WpmAction {
     $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
   }
 
-  Start-Sleep -Milliseconds $SettleMs
+  # THE ACTION WINDOW. Sampled DURING the settle sleep the engine already performed, so collecting
+  # proof costs no extra delay. This is the window the claim is made about; it is judged against the
+  # pre-action control captured above (proof-window decides how, from both). Attribution is arithmetic
+  # and lives in lib/proof-window.mjs -- the engine only produces samples.
+  $result.proofControl = $controlSamples
+  $result.proofSamples = Get-WpmProofWindow -Ms $SettleMs
 
   # Did the action actually take the owner's focus? Measured, not assumed -- the quiet tier is
   # expected to say no and the flash tier yes, and a run where both say the same thing is a broken

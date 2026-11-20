@@ -17,6 +17,8 @@ const REQUIRED = [
   'package.json',
   'lib/index.js',
   'lib/engine.js',
+  'lib/config.js',
+  'lib/proof-window.mjs',
   'lib/host-tools.js',
   'lib/peers-schemastery.js',
   'lib/peers-tools.js',
