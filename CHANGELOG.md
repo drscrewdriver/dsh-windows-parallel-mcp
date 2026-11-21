@@ -4,6 +4,50 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.1.5 — 2026-11-21
+
+A click that acted on the wrong control, and returned `ok:true` while doing it.
+
+**The defect.** The contract (`src/schema/tools.json`) makes `x`/`y` **required** for `click` and says
+a point that does not resolve inside the target is refused "instead of being sent somewhere else".
+The message tier honours that (`Resolve-WpmChildAtPoint`). The **UIA tier did not read `x`/`y` at
+all**: it scanned descendants and invoked the FIRST element carrying any usable pattern, then
+reported success. On any target without a message door — WPF, UWP, WinUI3, i.e. most modern
+applications — `click` at the coordinates of one control operated on a different one entirely, and
+the marker was still drawn at the requested point, so the product's own evidence pointed at a place
+it had not acted on. This is worse than a refusal: a refusal is honest, this was a wrong action
+wearing a success report.
+
+Measured, not inferred. A two-button WPF target at known coordinates, with the click counters
+written by the handlers themselves:
+- pre-fix engine, click aimed at **Bravo**: `alpha 0->1`, `bravo 0->0`, `last='alpha'`, result `ok:true`
+- fixed engine, same call: `bravo 0->1`, `alpha 0->0`, `last='bravo'`, `channel=uia tier=bounded-flash`
+
+**Fixed**
+- The UIA tier resolves the element **at the point** (`Resolve-WpmUiaElementAtPoint`,
+  `AutomationElement.FromPoint`), climbs to the nearest ancestor carrying a usable pattern, and
+  refuses when the point does not belong to the named window. Naming an element with
+  `elementName` still takes the by-name path: there the caller asked for that control.
+- **Ancestry is proven before the pattern is looked for.** The first version of this fix searched
+  while climbing and returned on the first pattern — which reproduced the original defect one level
+  down: a point outside the target climbed into the taskbar, found a patterned button there,
+  invoked it and answered `ok:true`. Caught by the "point outside the target" arm of the new test,
+  not by review.
+- `uiaErr` was produced and read by nobody (`grep` found zero consumers), so a walk that *threw*
+  reached the caller as "no message door and no usable UIA pattern" — a factual claim that may be
+  false. The probe now also carries `uiaReason`, and a refusal appends what the point probe found,
+  so `unreachable` no longer collapses two different worlds into one sentence.
+
+**Added**
+- `test/uia-click-target.ps1` — a two-button WPF target that publishes its button centres in
+  **physical pixels** (the test that computed them itself was 1.5x off; that DPI lesson is written
+  into the file) and writes click counts from the handlers that fired.
+- `test/uia-click-truth.mjs` — 12 arms, and a new gate (`scripts/check.mjs`, now 13). It fails in
+  both directions: point-at-Bravo must bump Bravo and not Alpha; a point outside the target must be
+  refused, must fire neither button, and must say *why*.
+
+**Unchanged** — the refusal-code set, the pure judgment, the message tier, the marker.
+
 ## 0.1.4 — 2026-11-21
 
 (Registry time is the authority for the timestamp; same convention as below.)

@@ -1,4 +1,4 @@
-﻿# win.ps1 -- the IO half of the R2' engine: probe a target's doors, act through the cheapest
+# win.ps1 -- the IO half of the R2' engine: probe a target's doors, act through the cheapest
 # door it has, and put the owner's focus back when the action cost them a flash.
 #
 # Layering is deliberate. decide.ps1 owns every judgement (pure, unit-tested). This file owns
@@ -449,6 +449,87 @@ function Get-WpmFamily([IntPtr]$Hwnd, [string]$Cls) {
   return 'unknown'
 }
 
+function Resolve-WpmUiaElementAtPoint {
+  <#
+    WHICH UIA ELEMENT SITS UNDER A SCREEN POINT -- the UIA twin of Resolve-WpmChildAtPoint.
+
+    WHY THIS EXISTS. The UIA tier used to take the FIRST descendant carrying any usable pattern and
+    invoke that, while the contract (src/schema/tools.json) says x/y are REQUIRED and that a point
+    which does not resolve inside the target is refused "instead of being sent somewhere else". On a
+    target with no message door -- WPF, UWP, WinUI3, i.e. most modern apps -- 'click 500,300' would
+    therefore Invoke whichever control happened to come first in tree order and return ok:true. That
+    is not a refusal, it is a wrong action reported as a right one, and it also breaks the marker's
+    promise (the marker is drawn at the requested point, which was then not the point acted on).
+
+    THE WALK-UP. AutomationElement.FromPoint returns the DEEPEST element at the point, which for a
+    button is usually its text child; the Invoke pattern lives on the ancestor. So the search climbs
+    from the hit element towards the target root and takes the nearest ancestor that has a usable
+    pattern. Climbing stops at the target's own root element: beyond it lies the caller's other
+    windows, and acting there would be acting on a window nobody named.
+
+    ANCESTRY IS PROVEN, NOT ASSUMED. If the climb reaches a null parent without meeting the target
+    root, the point belongs to a different window and the answer is a refusal -- the same rule the
+    message tier enforces with Root(hit) -ne Hwnd.
+  #>
+  param([IntPtr]$Hwnd, [int]$X, [int]$Y)
+
+  $out = @{ element = $null; patternKind = 'none'; err = ''; atPoint = $false; reason = '' }
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    if (-not $root) { $out.err = 'target window has no UIA element'; $out.reason = 'target element unavailable'; return $out }
+
+    $pt = New-Object System.Windows.Point([double]$X, [double]$Y)
+    $hitEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+    if (-not $hitEl) { $out.reason = 'nothing at that point is exposed to UI Automation'; return $out }
+    $out.atPoint = $true
+
+    # ANCESTRY FIRST, PATTERN SECOND. The first version of this function searched for a pattern
+    # while climbing and returned the moment it found one -- which re-created the very bug it was
+    # written to kill, one level down: a click at a point OUTSIDE the target climbed into the
+    # taskbar, found a patterned button there, invoked it, and reported ok:true. Caught by the
+    # 'point outside the target' arm of test/uia-click-truth.mjs. The order is the invariant:
+    # prove the point belongs to THIS window, and only then ask what at the point can be driven.
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $path = @()
+    $el = $hitEl
+    $sawRoot = $false
+    $hop = 0
+    while ($el -and $hop -lt 24) {
+      if ($el -eq $root) { $sawRoot = $true; break }
+      $path += $el
+      try { $el = $walker.GetParent($el) } catch { $el = $null }
+      $hop++
+    }
+    if ($el -eq $root) { $sawRoot = $true }
+
+    if (-not $sawRoot) {
+      # The climb ended without meeting the target root: the point is in another window, and
+      # acting there would be acting on a window nobody named.
+      $out.element = $null
+      $out.patternKind = 'none'
+      $out.reason = 'the element under that point does not belong to the target window'
+      return $out
+    }
+
+    $pats = Get-WpmUiaCached
+    foreach ($node in $path) {
+      foreach ($k in @('invoke', 'value', 'toggle', 'select', 'legacy')) {
+        if (-not $pats.ContainsKey($k)) { continue }
+        $obj = $null
+        $has = $false
+        try { $has = $node.TryGetCurrentPattern($pats[$k], [ref]$obj) } catch { $has = $false; $obj = $null }
+        if ($has -and $obj) { $out.element = $node; $out.patternKind = $k; return $out }
+      }
+    }
+    $out.reason = 'the element under that point exposes no usable UIA pattern'
+    return $out
+  } catch {
+    $out.err = $_.Exception.Message
+    $out.reason = 'the point probe threw'
+    return $out
+  }
+}
+
 function Get-WpmFacts {
   <#
     Measure a target's doors. Returns the hashtable decide.ps1 consumes, plus the raw handles the
@@ -456,7 +537,7 @@ function Get-WpmFacts {
     clicks must not pay it 50 times -- but the cache is keyed on hwnd AND invalidated by the caller
     when the window set changes, never assumed fresh.
   #>
-  param([IntPtr]$Hwnd, [string]$Action = 'click', [string]$ElementName = '', [switch]$NoCache)
+  param([IntPtr]$Hwnd, [string]$Action = 'click', [string]$ElementName = '', [int]$X = -1, [int]$Y = -1, [switch]$NoCache)
 
   $cls = [WpmWin]::Cls($Hwnd)
   $fam = Get-WpmFamily $Hwnd $cls
@@ -495,7 +576,25 @@ function Get-WpmFacts {
   $patKind = 'none'
   $uiaElement = $null
   $uiaErr = ''
-  if ($doorKinds.Count -eq 0 -or $ElementName) {
+  $uiaReason = ''
+
+  # A CLICK WITH COORDINATES IS RESOLVED AT THE POINT, never by tree order. See
+  # Resolve-WpmUiaElementAtPoint for what went wrong before this: the first descendant carrying a
+  # pattern was invoked regardless of x/y, so an unnamed click on a WPF/UWP/WinUI target acted on a
+  # control the caller never pointed at -- and answered ok:true. Naming an element (ElementName) is
+  # a different contract: there the caller asked for that control, so tree scan is correct.
+  $pointResolved = $false
+  if ($doorKinds.Count -eq 0 -and -not $ElementName -and $Action -eq 'click' -and $X -ge 0 -and $Y -ge 0) {
+    $pr = Resolve-WpmUiaElementAtPoint -Hwnd $Hwnd -X $X -Y $Y
+    $uiaErr = $pr.err
+    $uiaReason = $pr.reason
+    $pointResolved = $true
+    if ($pr.element) {
+      $hasPattern = $true
+      $patKind = $pr.patternKind
+      $uiaElement = $pr.element
+    }
+  } elseif ($doorKinds.Count -eq 0 -or $ElementName) {
     try {
       $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
       $cond = New-Object System.Windows.Automation.PropertyCondition(
@@ -552,6 +651,12 @@ function Get-WpmFacts {
     doorKinds = @($doorKinds | Sort-Object -Unique)
     uiaElement = $uiaElement
     uiaErr = $uiaErr
+    # Why there is no element, when there is none. Previously uiaErr was produced and then read by
+    # nobody (grep found zero consumers), so a point that resolved outside the target and a target
+    # whose tree cannot be walked at all reached the caller as the same sentence: 'no message door
+    # and no usable UIA pattern'. Two different worlds, one string -- and the fixes differ.
+    uiaReason = $uiaReason
+    pointResolved = $pointResolved
     pid = [WpmWin]::PidOf($Hwnd)
   }
 }

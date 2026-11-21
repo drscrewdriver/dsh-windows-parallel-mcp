@@ -1,4 +1,4 @@
-﻿# engine.ps1 -- the only place where a decision becomes a syscall.
+# engine.ps1 -- the only place where a decision becomes a syscall.
 #
 # One entry point, Invoke-WpmAction, and it always returns a result object rather than throwing on
 # a refusal: 'refused' is a normal outcome of this product, not an error path, and R3.2 requires
@@ -178,7 +178,9 @@ function Invoke-WpmAction {
     return $result
   }
 
-  $probe = Get-WpmFacts -Hwnd $h -Action $Action -ElementName $ElementName
+  # Coordinates travel into the probe: the UIA tier resolves the element AT THE POINT. Without them
+  # an unnamed click had no way to be anything other than "first control in tree order".
+  $probe = Get-WpmFacts -Hwnd $h -Action $Action -ElementName $ElementName -X $X -Y $Y
   $facts = $probe.facts
   $facts.paused = [bool][WpmCtl]::Paused
   if ($ElementName) {
@@ -194,6 +196,14 @@ function Invoke-WpmAction {
   $result.family = $probe.family; $result.cls = $probe.cls
   if ($decision.channel -eq 'refuse') {
     $result.refusal = $decision.refusal; $result.reason = $decision.reason
+    # A refusal that says only 'unreachable' makes the reader guess which of two very different
+    # things happened. When the point probe ran, it knows: the point is outside the target, or the
+    # element there has no pattern, or the tree could not be walked at all. Carry that out -- a
+    # refusal is a normal product outcome and its reason is the product (R3.2).
+    if ($decision.refusal -eq 'unreachable' -and $probe.uiaReason) {
+      $result.reason = "$($decision.reason) -- at that point: $($probe.uiaReason)"
+    }
+    if ($probe.uiaErr) { $result.reason = "$($result.reason) [uia: $($probe.uiaErr)]" }
     $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
     return $result
   }

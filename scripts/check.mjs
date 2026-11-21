@@ -154,6 +154,20 @@ pass = run('marker end-to-end (real click, independent oracle)', () => {
   return { ok: r.status === 0, out: notable.length ? `${tail} | ${notable.join(' | ')}` : tail };
 }) && pass;
 
+// THE POINT IS THE CONTRACT for a click. The UIA tier used to invoke the first descendant carrying
+// a pattern, ignoring x/y entirely, and answered ok:true -- a wrong action reported as a right one.
+// This arm drives a real two-button WPF target and reads the counters the APP writes, because
+// reading our own Invoke back through UIA would be grading homework in our own class. It fails in
+// both directions: point-at-Bravo must bump Bravo (not Alpha), and a point outside the target must
+// refuse (not redirect). ~15s including the target.
+pass = run('uia click acts on the point (two buttons, app-side oracle)', () => {
+  const r = spawnSync(process.execPath, ['test/uia-click-truth.mjs'], { encoding: 'utf8', timeout: 240000 });
+  const lines = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').map((l) => l.trim()).filter(Boolean);
+  const notable = lines.filter((l) => /^(FAIL|WARN|SKIP|INFO)/.test(l));
+  const tail = lines.filter((l) => /passed,/.test(l)).slice(-1)[0] || lines.slice(-1)[0] || '(no output)';
+  return { ok: r.status === 0, out: notable.length ? `${tail} | ${notable.join(' | ')}` : tail };
+}) && pass;
+
 const js = [].concat(...roots.map((rt) => walk(rt, ['.mjs', '.js'])));
 const jsFail = [];
 for (const f of js) {
