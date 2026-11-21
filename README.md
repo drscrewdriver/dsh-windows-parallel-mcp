@@ -12,6 +12,10 @@ a window accepts a window message, you never lose focus at all. Where it only ex
 you lose focus for one bounded flash that is reversed automatically. Everywhere else it refuses, with
 a code and a reason.
 
+Source, the measurement scripts behind every number below, and the release history live at
+**<https://github.com/drscrewdriver/dsh-windows-parallel-mcp>** — issues are the right place for
+"this target refused and I think it should not have".
+
 Not affiliated with `dsh-windows-mcp`. Different plugin, different trade-off: that one is a carrier
 bundle with a broad tool surface; this one is a single action tool whose entire design is about
 *not* disturbing the desktop.

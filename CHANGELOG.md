@@ -4,6 +4,27 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.1.4 — 2026-11-21
+
+(Registry time is the authority for the timestamp; same convention as below.)
+
+The source became reachable. Until now the package had **no repository, homepage or bugs field** —
+not an oversight at authoring time, but a consequence of the repo not existing: there was no URL to
+put there. `git remote -v` was empty through 0.1.0–0.1.3, so every claim in the README pointed at a
+tarball and nowhere else. Creating the repository is what unblocks this, and it is the only reason
+this release exists.
+
+**Added**
+- `repository`, `homepage` and `bugs` in `package.json`, so npmjs.com links to the source and to an
+  issue tracker instead of leaving a reader with a download and no way to report a refusal that
+  should not have happened.
+- README now names the repository in its opening section, next to the non-affiliation notice.
+
+**Unchanged**
+- No behaviour. `lib/`, `src/engine/` and the schema are byte-identical to 0.1.3 — this release only
+  makes the existing artifact findable. The gate is still green (12 checks), and the profile on the
+  authoring machine keeps running 0.1.3 code with an identical `lib` hash.
+
 ## 0.1.3 — 2026-11-21
 
 (Registry time `2026-11-21T01:20:58Z` UTC (= `2026-11-21 09:20` Beijing; the date follows the same UTC convention as the entries below — the publish time is the promise.)

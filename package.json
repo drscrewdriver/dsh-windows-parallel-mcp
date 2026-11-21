@@ -1,6 +1,6 @@
 {
   "name": "dsh-windows-parallel-mcp",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publishConfig": {
     "access": "public",
     "tag": "latest"
@@ -18,6 +18,14 @@
     "computer-use"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drscrewdriver/dsh-windows-parallel-mcp.git"
+  },
+  "homepage": "https://github.com/drscrewdriver/dsh-windows-parallel-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/drscrewdriver/dsh-windows-parallel-mcp/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
