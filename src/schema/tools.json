@@ -37,7 +37,9 @@
     { "code": "no_hwnd", "layer": "decision", "summary": "no usable target window handle" },
     { "code": "paused", "layer": "decision", "summary": "the owner paused input; server-side refusal" },
     { "code": "elevated_target", "layer": "decision", "summary": "target runs at a higher integrity level" },
-    { "code": "unreachable", "layer": "decision", "summary": "no message door and no usable UIA pattern" },
+    { "code": "unreachable", "layer": "decision", "summary": "no message door and no usable UIA pattern; the tree is alive but offers nothing at the named point or element" },
+    { "code": "uia_tree_empty", "layer": "decision", "summary": "the accessibility tree holds no content element at all; in every measured instance the cause is the application having UI Automation disabled, which only a launch-time switch changes" },
+    { "code": "uia_probe_failed", "layer": "decision", "summary": "the accessibility probe threw before it could measure this target; the exception text rides the reason" },
     { "code": "terminal_no_door", "layer": "decision", "summary": "terminal text surface exposes neither a child window nor a document element" },
     { "code": "needs_facts", "layer": "decision", "summary": "the caller supplied no measured facts for this target" },
     { "code": "action_failed", "layer": "runtime", "summary": "the chosen channel threw while acting", "uncoveredReason": "needs a target whose channel reliably throws; not constructed this round (docs/refusals.md, gap 2)" },
@@ -74,7 +76,7 @@
         "required": ["hwnd", "x", "y"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "terminal_no_door", "action_failed", "restore_failed"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed"]
     },
     {
       "name": "wpm_type",
@@ -93,7 +95,7 @@
         "required": ["hwnd", "text"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "terminal_no_door", "action_failed", "restore_failed"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed"]
     },
     {
       "name": "wpm_focus",
@@ -110,7 +112,7 @@
         "required": ["hwnd", "elementName"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "terminal_no_door", "action_failed", "restore_failed"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed"]
     },
     {
       "name": "wpm_status",
@@ -176,6 +178,22 @@
       "facts": { "hwnd": "$liveHwnd", "family": "terminal" },
       "expect": "terminal_no_door",
       "note": "Decision-table instance only. A real terminal window is not launched in this run because findings.md:311-316 records a leftover-dialog accident on this host; the real evidence is the coverage census."
+    },
+    {
+      "id": "click-uia-tree-empty",
+      "mode": "decision",
+      "tool": "wpm_click",
+      "facts": { "hwnd": "$liveHwnd", "family": "chromium", "uiaTreeEmpty": true },
+      "expect": "uia_tree_empty",
+      "note": "Decision-table instance of the 2026-11-21 census: a Chromium window with renderer accessibility off walks to a tree with ZERO content elements (uTools measured one Chrome Legacy Window shell Pane, 0 interactive elements, identical across three in-place reads). Distinct from unreachable because the fix differs: nothing a re-query can find -- the app must relaunch with a11y on (--force-renderer-accessibility) or a different target must be picked. Real instance: scripts/uia-tree-content.ps1 plus a live engine call against uTools."
+    },
+    {
+      "id": "click-uia-probe-failed",
+      "mode": "decision",
+      "tool": "wpm_click",
+      "facts": { "hwnd": "$liveHwnd", "uiaProbeFailed": true },
+      "expect": "uia_probe_failed",
+      "note": "Decision-table instance. The UIA probe threw between the IsWindow check and the tree walk (element destroyed under the probe), so door measurement is impossible and no conclusion about the target is licensed. The engine appends the exception text to the reason as [uia: ...]. Before this code existed a thrown probe and a genuinely pattern-less target shared 'unreachable', and uiaErr arrived here as dead data."
     },
     {
       "id": "needs-facts",

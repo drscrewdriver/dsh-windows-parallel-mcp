@@ -4,6 +4,52 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.1.6 — 2026-11-21
+
+Two failures that shared one refusal code are split — because the reader's next step differs.
+
+**The defect.** Everything door-less came back `unreachable`. Two of its causes are opposites: a
+tree that was never populated (the application has UI Automation off — measured on this desktop:
+uTools walks to zero content elements on three in-place reads spanning 2.2 s and never grows one),
+and a probe that threw (the tree could not be measured at all). The probe's own diagnostic was
+already being produced and then wasted: `uiaErr` reached the result object only as a reason-string
+suffix that nothing branched on — 0.1.5's point-probe work found it as dead data. A caller reading
+`unreachable` could not tell "pick another target" from "make the app enable accessibility" from
+"read the exception".
+
+**Fixed**
+- **`uia_tree_empty`** — the walked tree holds **zero content elements**. The criterion is
+  structural, not numeric: Pane/Group/Image/Text/Thumb/Separator/TitleBar are the window's own
+  shell; anything else (Button, Edit, Document, Custom) is something an application chose to
+  expose. Count alone lies — an a11y-off Chromium window still exposes one
+  `Chrome_RenderWidgetHostHWND` shell pane, and the same uTools window measured raw=0 and raw=1
+  the same day depending on its own state while content stayed 0 throughout. The reason states
+  the observation, not an exclusive cause: a provider that answers nothing (a hung pump) reads as
+  empty too, instantly, without throwing — that second cause is documented, not hidden.
+- **`uia_probe_failed`** — the probe threw before it could measure; no conclusion about the
+  target is licensed. The exception text rides the reason as `[uia: …]`. Measured: WM_CLOSE
+  landing 40 ms into the call (between the `IsWindow` check and `FromHandle`) returns this code
+  with the original exception text, not `unreachable`. Probe failure outranks tree-empty — a
+  measurement that threw cannot also certify emptiness — and a usable door outranks both.
+- **The refusal reason carries the probe's context for all three codes**: which point was probed
+  and what it found there, plus the exception when one exists. A diagnosis with the evidence
+  redacted is not a diagnosis.
+
+**Also**
+- The reverse assertion about Chromium's "lazy" accessibility is written where the next reader
+  will trip over it (`scripts/chromium-a11y-flag.mjs` conclusion, README's measurement section):
+  the same window re-read in place three times (+0/+700/+1500 ms) never grew content, an a11y-on
+  tree answers completely on the first query — so the engine does NOT re-query with a deadline
+  and no retry exists anywhere. The instrument ships:
+  `scripts/uia-tree-content.ps1` reads the same two counters with the same shell-type table the
+  engine decides on.
+
+Measured instances behind every claim above: real-window end-to-end refusals for all three codes
+(`uia_tree_empty` via both the scan and the point path on uTools; `unreachable` on a tree-alive
+window; `uia_probe_failed` on a mid-probe destroy), decision-table arms for each new branch and
+its precedence, and `refusals-test` 11 passed with 2 codes still declared uncovered
+(`action_failed`, `restore_failed`).
+
 ## 0.1.5 — 2026-11-21
 
 A click that acted on the wrong control, and returned `ok:true` while doing it.

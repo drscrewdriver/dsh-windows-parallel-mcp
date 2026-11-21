@@ -199,8 +199,12 @@ function Invoke-WpmAction {
     # A refusal that says only 'unreachable' makes the reader guess which of two very different
     # things happened. When the point probe ran, it knows: the point is outside the target, or the
     # element there has no pattern, or the tree could not be walked at all. Carry that out -- a
-    # refusal is a normal product outcome and its reason is the product (R3.2).
-    if ($decision.refusal -eq 'unreachable' -and $probe.uiaReason) {
+    # refusal is a normal product outcome and its reason is the product (R3.2). The split codes
+    # (uia_probe_failed / uia_tree_empty, decide.ps1) need the same context, so the point reason
+    # rides on all of them; the probe's exception text always follows when it exists, because a
+    # uia_probe_failed refusal whose reason hides the exception is a diagnosis with the evidence
+    # redacted.
+    if ($decision.refusal -in @('unreachable', 'uia_probe_failed', 'uia_tree_empty') -and $probe.uiaReason) {
       $result.reason = "$($decision.reason) -- at that point: $($probe.uiaReason)"
     }
     if ($probe.uiaErr) { $result.reason = "$($result.reason) [uia: $($probe.uiaErr)]" }

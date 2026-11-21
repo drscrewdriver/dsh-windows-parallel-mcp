@@ -94,6 +94,30 @@ for (const c of cases) {
 console.log('\n===== COMPARISON =====');
 for (const r of results) console.log(JSON.stringify(r));
 const plain = results[0], forced = results[1];
+
+// REVERSE ASSERTION -- MEASURED, AND THE REASON NO RETRY EXISTS ANYWHERE IN THE ENGINE.
+// The arm comparison above leaves one alternative reading alive: "maybe the plain-launch tree is
+// just SLOW" (Chromium's renderer accessibility is documented as demand-activated, and building
+// it is asynchronous -- a first empty answer could legitimately be a pending one). That reading
+// was tested, not assumed away: the same window was re-read IN PLACE three times (+0/+700/+1500ms)
+// with the census's own counting (scripts/uia-tree-content.ps1, which also separates raw
+// descendants from CONTENT elements -- raw alone lies, because an a11y-off Chromium window still
+// exposes one Chrome_RenderWidgetHostHWND shell pane):
+//   uTools  raw p1/p2/p3 = 0/0/0, content 0/0/0 -- the run the census published; one earlier
+//           peek the same day read raw=1 (the shell pane surfacing) with content still 0/0/0;
+//   DSH     first read = 1019 raw / 85 content (514 raw at census time, same day) -- an a11y-on
+//           tree answers completely on the FIRST query, it does not trickle in.
+// Three reads over 2.2 seconds produced zero content elements every time, two orders of magnitude
+// below every a11y-on tree on the same desktop. That kills the lazy-activation reading for
+// coverage purposes: an empty tree is not a tree that is slow, it is an application that has not
+// enabled UI Automation, and nothing a client re-queries will change it. Consequences, stated so
+// they cannot be softened later: (1) the engine must NOT re-query with a deadline -- there is
+// nothing to wait for, and a poll built on a wrong premise reports its own artifact (the
+// idle-baseline lesson, twice); (2) the refusal that names this world is `uia_tree_empty`
+// (docs/refusals.md), distinct from `unreachable` (tree alive, nothing usable at that point);
+// (3) the actual switch is launch-time -- --force-renderer-accessibility -- which the engine
+// cannot impose on a browser the user already has open.
+
 // The primary signal is documentsFound, not docElements. A plain launch returned
 // "documents found: 0" -- there was NO page Document node to count children of -- and
 // reading that as "0 children" would misdescribe the finding: the page is not exposed as

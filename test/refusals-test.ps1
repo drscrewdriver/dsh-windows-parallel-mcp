@@ -93,6 +93,7 @@ function New-CaseFacts([object]$factsSpec) {
     hwnd = 'Hwnd'; paused = 'Paused'; elevatedTarget = 'ElevatedTarget'; family = 'Family'
     messageDoor = 'MessageDoor'; hasPattern = 'HasPattern'; patternKind = 'PatternKind'
     action = 'Action'; factsMeasured = 'FactsMeasured'
+    uiaTreeEmpty = 'UiaTreeEmpty'; uiaProbeFailed = 'UiaProbeFailed'
   }
   $splat = @{}
   foreach ($k in $factsSpec.PSObject.Properties.Name) {

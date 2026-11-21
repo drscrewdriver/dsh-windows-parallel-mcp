@@ -1,11 +1,14 @@
 # dsh-windows-parallel-mcp
 
-> **0.1.3 — the proof now says who reported the success, not just that you were undisturbed.** The
-> name was reserved earlier under a weaker claim (see [CHANGELOG.md](CHANGELOG.md)); the claim below
-> is the measured one. 0.1.1 is 0.1.0's behaviour with a corrected packaging chain; 0.1.2 added the
-> runtime proof chain (`proof=` verdict and `proofDimensions`, measured against the desktop around
-> your own call); 0.1.3 adds the second half — `effect=` — and lets it enter the judgment, so a call
-> that accomplished nothing can no longer read as `proof=pass`.
+> **0.1.6 — a refusal now says which world it saw.** `unreachable` used to cover two failures with
+> different fixes: a tree that holds no content at all (the application has UI Automation off;
+> nothing to re-query for — which is why the engine never retries) is now `uia_tree_empty`, and a
+> probe that threw before it could measure (no conclusion about the target is licensed; the
+> exception text rides the reason) is now `uia_probe_failed`. 0.1.5 made a click act on the point
+> it names; 0.1.3 added `effect=` — who reported the success — and let it enter the judgment, so a
+> call that accomplished nothing can no longer read as `proof=pass`; 0.1.2 added the proof chain
+> (`proof=`, `proofDimensions`, measured against the desktop around your own call); 0.1.1 is
+> 0.1.0's behaviour with a corrected packaging chain. Full history: [CHANGELOG.md](CHANGELOG.md).
 
 A DSH plugin that lets an agent drive **its own** Windows windows without moving your cursor. Where
 a window accepts a window message, you never lose focus at all. Where it only exposes UI Automation,
@@ -62,8 +65,8 @@ silently claims the documented key works. `overlay=true` in settings controls th
 flag itself is engine-side and refuses actions with `paused`.
 
 Refusals are a normal result, not an error: `no_hwnd`, `paused`, `elevated_target`, `unreachable`,
-`terminal_no_door`, `needs_facts`, `action_failed`, `restore_failed`. Each carries a reason and a
-next step — see [docs/refusals.md](docs/refusals.md).
+`uia_tree_empty`, `uia_probe_failed`, `terminal_no_door`, `needs_facts`, `action_failed`,
+`restore_failed`. Each carries a reason and a next step — see [docs/refusals.md](docs/refusals.md).
 
 **Every real click carries its own disturbance proof.** `click` returns a `proof=pass|inconclusive|…`
 verdict plus a `proofDimensions` field (cursor / foreground / focus). Around your call the engine
@@ -156,6 +159,17 @@ goal statement did not survive it. Kept here rather than quietly dropped:
   UIA `Invoke` was foreground-neutral in 0 of 12 rounds — the earlier 6/6 and 12/12 were measured
   under a construction that first took the foreground away. The flash tier is a fuse, not a promise
   of disturbance.
+- **An empty accessibility tree is a switch, not a delay.** The alternative reading — Chromium
+  activates renderer accessibility on demand, so the tree might be merely slow — was tested, not
+  assumed away: the same window was re-read in place three times (+0/+700/+1500 ms,
+  `scripts/uia-tree-content.ps1`). uTools read **0/0/0** descendants, zero interactive content
+  elements every time (one earlier peek the same day saw a single `Chrome Legacy Window` shell
+  pane appear, content still 0); DSH on the same desktop read a real tree on the **first** query
+  (514 at census time, 1019 raw / 85 content on re-read). Nothing ever trickled in. So the
+  engine refuses with `uia_tree_empty` and does **not** poll — there is nothing to wait for — and
+  the actual switch is a launch-time state (`--force-renderer-accessibility`) the engine cannot
+  impose on a browser the user already has open. `unreachable` is the other world: the tree is
+  alive and offers nothing at the named point or element.
 
 `elevated_target` is measured live: the engine compares the target's integrity RID against its own
 and refuses before acting (verified on an elevated Task Manager; 19 medium windows, zero

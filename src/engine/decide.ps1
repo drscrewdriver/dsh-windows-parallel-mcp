@@ -8,10 +8,15 @@
 # them, and it is kept free of IO so a wrong verdict cannot hide behind a passing desktop.
 #
 # THE FACTS IT CONSUMES, and where each came from:
-#   messageDoor  -- 17/57 live windows expose a classic child door (neutral-coverage-census)
-#   hasPattern   -- WPF/UWP/Chromium expose UIA patterns; WinForms exposes none (probe-winform)
-#   cursor cost  -- zero in every channel (channel-raise-matrix, 0 px across 24 rounds)
-#   focus cost   -- message door 0/6 raise; UIA pattern 6/6 and 12/12 raise
+#   messageDoor   -- 17/57 live windows expose a classic child door (neutral-coverage-census)
+#   hasPattern    -- WPF/UWP/Chromium expose UIA patterns; WinForms exposes none (probe-winform)
+#   uiaTreeEmpty  -- an a11y-off Chromium window walks to ZERO content elements and never grows
+#                    one under re-query (uTools 1/1/1 raw, 0/0/0 content, 2026-11-21; census read
+#                    0/0/0 the same day) -- scripts/uia-tree-content.ps1 re-measures it
+#   uiaProbeFailed-- the probe's own exception, carried out of win.ps1 as a boolean so the code
+#                    selection never parses message text
+#   cursor cost   -- zero in every channel (channel-raise-matrix, 0 px across 24 rounds)
+#   focus cost    -- message door 0/6 raise; UIA pattern 6/6 and 12/12 raise
 # Each fact is a measurement, not a guess. A fact that was never measured is NOT allowed to
 # default to the flattering branch: missing facts refuse, they do not assume quiet.
 
@@ -24,6 +29,8 @@ $script:WpmRefusals = @{
   paused             = 'owner paused input; server-side refusal, not a prompt-level hint'
   elevated_target    = 'target runs at a higher integrity level; a non-elevated process cannot write to it'
   unreachable        = 'no message door and no usable UIA pattern; this target cannot be driven without physical input'
+  uia_tree_empty     = 'the accessibility tree holds no content element at all: no pattern can ever appear here, and re-querying has nothing to wait for'
+  uia_probe_failed   = 'the accessibility probe itself threw before it could measure this target; whether a usable pattern exists was never learned'
   terminal_no_door   = 'terminal text surface exposes no child HWND and no Document element'
   needs_facts        = 'the caller supplied no measured facts for this target; refusing instead of assuming quiet'
 }
@@ -40,12 +47,15 @@ function New-WpmFacts {
     [bool]$HasPattern = $false,
     [string]$PatternKind = 'none',      # invoke | value | toggle | selectionitem | legacy | none
     [string]$Action = 'click',          # click | type | key | scroll
-    [bool]$FactsMeasured = $false
+    [bool]$FactsMeasured = $false,
+    [bool]$UiaTreeEmpty = $false,       # the walked tree contained zero content elements (win.ps1 Test-WpmUiaTreeHasContent)
+    [bool]$UiaProbeFailed = $false      # the UIA probe threw; uiaErr carries the exception text (win.ps1)
   )
   return @{
     hwnd = $Hwnd; paused = $Paused; elevatedTarget = $ElevatedTarget; family = $Family
     messageDoor = $MessageDoor; hasPattern = $HasPattern; patternKind = $PatternKind
     action = $Action; factsMeasured = $FactsMeasured
+    uiaTreeEmpty = $UiaTreeEmpty; uiaProbeFailed = $UiaProbeFailed
   }
 }
 
@@ -107,6 +117,27 @@ function Get-WpmChannelDecision {
   if (-not $Facts.factsMeasured) {
     return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
       refusal = 'needs_facts'; reason = $script:WpmRefusals.needs_facts }
+  }
+
+  # THREE WORLDS USED TO SHARE ONE CODE ('unreachable'), and they have different fixes, which is
+  # why they stopped sharing it (2026-11-21: 0.1.5's point-probe fix exposed uiaErr arriving here
+  # as dead data; the census the same day exposed the tree split). A tree with NO content element
+  # needs the APPLICATION to enable accessibility -- launch-time for Chromium
+  # (--force-renderer-accessibility); re-querying cannot help, which is exactly why no retry or
+  # polling exists anywhere in this engine. A probe that THREW means the measurement itself
+  # failed, so no conclusion about the target is licensed -- the exception text rides the reason
+  # (engine.ps1 appends it), and the caller reads it instead of guessing. The plain door-less
+  # case with a live tree means 'pick another target or point'. Probe failure outranks
+  # tree-empty: a measurement that threw cannot also certify emptiness. And a usable door still
+  # outranks every diagnosis -- these branches only replace the terminal refusal, never a
+  # working channel.
+  if ($Facts.uiaProbeFailed) {
+    return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
+      refusal = 'uia_probe_failed'; reason = $script:WpmRefusals.uia_probe_failed }
+  }
+  if ($Facts.uiaTreeEmpty) {
+    return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
+      refusal = 'uia_tree_empty'; reason = $script:WpmRefusals.uia_tree_empty }
   }
   return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
     refusal = 'unreachable'; reason = $script:WpmRefusals.unreachable }

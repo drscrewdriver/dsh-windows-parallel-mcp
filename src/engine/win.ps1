@@ -437,6 +437,47 @@ function Get-WpmUiaCached {
   return $script:WpmUia
 }
 
+function Test-WpmUiaTreeHasContent([IntPtr]$Hwnd, [int]$MaxElements = 200) {
+  <#
+    Does this target's accessibility tree contain ANY content element, or is it shell only?
+    Returns $true when at least one element carries a content control type, $false when the
+    walked tree is only structural chrome, and $false when the walk itself cannot run (a walk
+    that failed must not be reported as "measured empty" -- the caller distinguishes that world
+    through the probe error, not through this answer).
+
+    WHY CONTENT, NOT COUNT. "The tree is empty" cannot mean Count == 0: a Chromium window with
+    renderer accessibility off still exposes ONE shell element -- the Chrome_RenderWidgetHostHWND
+    pane ("Chrome Legacy Window") -- so uTools measures raw=1 while carrying zero drivable
+    content, and the same window measured raw=0 earlier the same day depending on its own state.
+    What never changed across every re-read was the CONTENT count: 0 for the a11y-off window,
+    hundreds for the a11y-on ones (DSH 514 at census time, 1019 later; ZCode 497). The stable
+    boundary is structural, not numeric: shell types (Pane/Group/Image/Text/Thumb/Separator/
+    TitleBar) are the window's own chrome; anything else -- Button, Edit, Document, Custom --
+    is something an application chose to expose. Custom counts as content deliberately: it may
+    be undrivable, but calling it "empty" would claim the app has a11y off, and a wrong
+    uia_tree_empty is a worse lie than an honest unreachable.
+
+    Measured on 2026-11-21 (see scripts/uia-tree-content.ps1, which reads the same two counters
+    with the same shell list). This is also why NO retry/polling exists for a tree that answers
+    empty: three in-place reads over 2.2s produced zero content elements every time -- there is
+    nothing to wait for. The switch is launch-time: --force-renderer-accessibility.
+  #>
+  try {
+    $rootEl = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    $all = $rootEl.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition)
+    $n = [Math]::Min($all.Count, $MaxElements)
+    for ($i = 0; $i -lt $n; $i++) {
+      $t = ''
+      try { $t = $all[$i].Current.ControlType.ProgrammaticName -replace 'ControlType\.', '' } catch { continue }
+      if (@('Pane', 'Group', 'Image', 'Text', 'Thumb', 'Separator', 'TitleBar') -notcontains $t) { return $true }
+    }
+    return $false
+  } catch {
+    return $false
+  }
+}
+
 function Get-WpmFamily([IntPtr]$Hwnd, [string]$Cls) {
   # Family decides which door is even possible, so it is measured from the class name rather than
   # guessed from the title: a title is the user's text, a class is the toolkit's identity.
@@ -577,6 +618,7 @@ function Get-WpmFacts {
   $uiaElement = $null
   $uiaErr = ''
   $uiaReason = ''
+  $scanProbed = $false
 
   # A CLICK WITH COORDINATES IS RESOLVED AT THE POINT, never by tree order. See
   # Resolve-WpmUiaElementAtPoint for what went wrong before this: the first descendant carrying a
@@ -595,6 +637,7 @@ function Get-WpmFacts {
       $uiaElement = $pr.element
     }
   } elseif ($doorKinds.Count -eq 0 -or $ElementName) {
+    $scanProbed = $true
     try {
       $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
       $cond = New-Object System.Windows.Automation.PropertyCondition(
@@ -629,6 +672,18 @@ function Get-WpmFacts {
     }
   }
 
+  # EMPTY TREE vs PATTERN-LESS CONTENT, measured rather than folded into one word. When the UIA
+  # probe ran and found nothing usable, two different worlds produce the same hasPattern=false:
+  # a tree that was never populated (the app has a11y off -- uTools walks to one shell Pane and
+  # zero content elements, and no amount of re-querying changes that), and a tree that is alive
+  # but offers nothing at the named point or element (ZCode/DSH walk to hundreds of elements).
+  # They get different refusal codes (decide.ps1), so this measurement runs only when the probe
+  # actually ran -- never to decorate a target whose message door already decided the route.
+  $uiaTreeEmpty = $false
+  if (-not $hasPattern -and ($pointResolved -or $scanProbed)) {
+    $uiaTreeEmpty = -not (Test-WpmUiaTreeHasContent $Hwnd)
+  }
+
   # Elevation is now measured, not assumed. WpmWin::IsElevatedTarget compares the target's
   # integrity RID against ours; a failure to read either side returns false rather than guessing,
   # because guessing 'elevated' would refuse every window whose handle read failed. The flag is
@@ -640,7 +695,8 @@ function Get-WpmFacts {
 
   $facts = New-WpmFacts -Hwnd ($Hwnd.ToInt64().ToString()) -Family $fam `
     -MessageDoor ($doorKinds.Count -gt 0) -HasPattern $hasPattern -PatternKind $patKind `
-    -Action $Action -FactsMeasured $true -ElevatedTarget $elevated
+    -Action $Action -FactsMeasured $true -ElevatedTarget $elevated `
+    -UiaTreeEmpty $uiaTreeEmpty -UiaProbeFailed ($uiaErr -ne '')
 
   return @{
     facts = $facts
@@ -656,6 +712,11 @@ function Get-WpmFacts {
     # whose tree cannot be walked at all reached the caller as the same sentence: 'no message door
     # and no usable UIA pattern'. Two different worlds, one string -- and the fixes differ.
     uiaReason = $uiaReason
+    # The two booleans that decide.ps1 splits 'unreachable' on travel INSIDE $facts, built through
+    # the typed constructor above -- deliberately NOT duplicated here. A second copy of a measured
+    # value in the same return object is the two-copies-drift bug this repo keeps meeting; the
+    # first live-instance run of this very change caught exactly that shape (facts said False
+    # while the raw measurement said True, because the constructor call had not been extended).
     pointResolved = $pointResolved
     pid = [WpmWin]::PidOf($Hwnd)
   }

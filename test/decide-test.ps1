@@ -50,6 +50,31 @@ Assert-Case 'unmeasured target is refused, not assumed quiet' (Get-WpmChannelDec
 Assert-Case 'measured door-less target is unreachable' (Get-WpmChannelDecision (New-WpmFacts `
   -Hwnd '0x5' -Family 'chromium' -FactsMeasured $true)) @{ channel = 'refuse'; refusal = 'unreachable' }
 
+# The two worlds behind a probe that found nothing. 2026-11-21 census and re-read: a Chromium
+# window with renderer accessibility off walks to a tree with ZERO content elements (uTools:
+# one Chrome Legacy Window shell Pane, no interactive element, identical across three in-place
+# reads), while an a11y-on window walks to hundreds (DSH 514 at census time, 1019 on re-read).
+# One code for both worlds made the fix unreadable: tree-empty needs the APP to relaunch with
+# a11y on, unreachable needs a different target or point. No retry belongs to either -- the
+# empty tree never grows content under re-query, which is measured, not assumed.
+Assert-Case 'a tree with no content elements is uia_tree_empty, not unreachable' (Get-WpmChannelDecision (New-WpmFacts `
+  -Hwnd '0xa' -Family 'chromium' -FactsMeasured $true -UiaTreeEmpty $true)) @{ channel = 'refuse'; refusal = 'uia_tree_empty' }
+
+# A probe that THREW cannot say anything about the tree: an unmeasurable tree is not an empty
+# tree, and the exception text rides the reason rather than a generic failure word.
+Assert-Case 'a probe that threw is uia_probe_failed, not unreachable' (Get-WpmChannelDecision (New-WpmFacts `
+  -Hwnd '0xb' -Family 'chromium' -FactsMeasured $true -UiaProbeFailed $true)) @{ channel = 'refuse'; refusal = 'uia_probe_failed' }
+
+# Precedence between the two: a measurement that threw cannot also certify emptiness, so the
+# probe failure wins when both flags are somehow set.
+Assert-Case 'probe failure outranks tree-empty when both are set' (Get-WpmChannelDecision (New-WpmFacts `
+  -Hwnd '0xc' -Family 'chromium' -FactsMeasured $true -UiaProbeFailed $true -UiaTreeEmpty $true)) @{ channel = 'refuse'; refusal = 'uia_probe_failed' }
+
+# And a usable door still outranks every diagnosis: these codes only replace the terminal
+# refusal, never a working channel.
+Assert-Case 'message door outranks a thrown probe' (Get-WpmChannelDecision (New-WpmFacts `
+  -Hwnd '0xd' -Family 'chromium' -MessageDoor $true -FactsMeasured $true -UiaProbeFailed $true)) @{ channel = 'message'; tier = 'quiet' }
+
 # Ordering: paused must beat a working door. If capability were checked first, this would return
 # 'message' and the caller would act while the owner had asked it to stop.
 Assert-Case 'pause beats a working message door' (Get-WpmChannelDecision (New-WpmFacts `
