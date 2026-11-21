@@ -183,6 +183,48 @@ const mk = (n, over) => Array.from({ length: n }, (_, i) => ({
     evaluateProof(fgSwitchNoControl).verdict === 'fail', JSON.stringify(evaluateProof(fgSwitchNoControl).dimensions));
 }
 
+// 12. THE EFFECT DIMENSION: "who reported the success", so a clean window can never outvote a
+//     total no-op. Same quiet samples throughout -- the ONLY thing that changes is the effect, which
+//     proves the verdict moves on the effect and not on the (unmoving) desktop. The old plan named
+//     this case (50 failed calls, zero displacement, green light) and never landed it; these four
+//     arms are that case, direction by direction.
+{
+  const quiet = mk(20);
+
+  // (a) nothing to report at all => never a pass. Silence is not innocence here either.
+  const unv = evaluateProof(quiet, { effect: 'unverified' });
+  ok("zero displacement + effect 'unverified' => NOT pass", unv.verdict !== 'pass',
+    JSON.stringify({ v: unv.verdict, dims: unv.dimensions }));
+  ok('  the effect dimension is what refuses the pass', unv.dimensions?.effect === 'inconclusive',
+    JSON.stringify(unv.dimensions));
+
+  // (b) THE ANTI-SELF-DECEPTION CASE: 50 attempts, every one failed, not one pixel of displacement.
+  const allFailed = evaluateProof(quiet, {
+    effect: 'unverified',
+    actions: Array.from({ length: 50 }, () => ({ ok: false, effect: 'unverified' })),
+  });
+  ok('zero displacement + 50 failed attempts => fail', allFailed.verdict === 'fail',
+    JSON.stringify({ v: allFailed.verdict, dims: allFailed.dimensions }));
+  ok('   the reason says the actions never took effect (动作未生效)', /动作未生效/.test(allFailed.reason),
+    allFailed.reason);
+
+  // (c) a channel reported the call returned. Not a red -- nobody proved it did not -- but the reason
+  //     must refuse to call it verified, or the tool is over-claiming exactly like the README may not.
+  const sent = evaluateProof(quiet, { effect: 'reported-by-send' });
+  ok("zero displacement + 'reported-by-send' => pass (no false red)", sent.verdict === 'pass',
+    JSON.stringify({ v: sent.verdict, dims: sent.dimensions }));
+  ok('   but the reason carries 未独立验证 (the channel spoke, nobody observed the app)',
+    /未独立验证/.test(sent.reason), sent.reason);
+
+  // (d) ONE pattern-reported attempt stays a pass: the false-red defence. Half-landed evidence is not
+  //     a failure, and collapsing it into one would train callers to ignore the verdict.
+  const pat = evaluateProof(quiet, { effect: 'reported-by-pattern' });
+  ok("zero displacement + a single 'reported-by-pattern' => pass", pat.verdict === 'pass',
+    JSON.stringify({ v: pat.verdict, dims: pat.dimensions }));
+  ok('  the effect dimension passes, and the caveat is still printed', pat.dimensions?.effect === 'pass'
+    && /未独立验证/.test(pat.reason), JSON.stringify(pat.dimensions));
+}
+
 console.log('');
 console.log(`proof-window: ${pass} passed, ${failures.length} failed`);
 process.exit(failures.length ? 1 : 0);

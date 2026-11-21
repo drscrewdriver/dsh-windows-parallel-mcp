@@ -4,6 +4,45 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.1.3 — 2026-11-21
+
+(Registry time `2026-11-21T01:20:58Z` UTC (= `2026-11-21 09:20` Beijing; the date follows the same UTC convention as the entries below — the publish time is the promise.)
+
+0.1.2 shipped a proof that answered "did we disturb you". It never answered "did the thing happen" —
+the engine computed `effect` on every action call and the Node half dropped it on the floor, so
+`proof=pass` could mean *"clicked, and the app ignored it"*. This release closes that link, and then
+closes the hole the missing link was hiding.
+
+**Added**
+- `effect=` in every action result's text and `effect` in the structured output, with three values
+  that name the SPEAKER rather than the confidence: `unverified` (nobody), `reported-by-send` (the
+  message was delivered), `reported-by-pattern` (the UIA call returned). README carries the table;
+  the code comment above the branch pins the same three lines. A refusal reports no effect at all —
+  no action ran, so nobody can have spoken.
+- `lib/proof-window.mjs` gains an effect dimension: `evaluateProof(samples, { effect, actions })`.
+  A call whose channel reported nothing is capped at `inconclusive`; a batch caller whose every
+  attempt failed gets `fail` regardless of displacement. Both are opt-in — omitting `effect` leaves
+  every pre-0.1.3 caller's behaviour untouched, which is why the 32 pre-existing arms did not move.
+
+**Corrected**
+- The gate could read a total no-op as a green light: zero cursor displacement, zero foreground
+  switches, nothing accomplished => `pass`. The old plan named the case ("50 failed calls, zero
+  displacement, FAIL") and never landed it. It is landed now, with the arms that fail in the
+  direction that matters: `unverified` + a still desktop is not a pass, and 50 failed attempts is a
+  `fail` whose reason says 动作未生效.
+- Word boundaries: `reported-by-send` says the message was DELIVERED. It does not say the application
+  processed it, and `reported-by-pattern` does not say the interface changed. Single `reported-by-*`
+  evidence still passes (it is real, just not independent) and the reason says so out loud: 未独立验证.
+
+**Verified**
+- `node test/proof-window-test.mjs` — 40 arms, 0 failed (32 carried over unchanged, 8 new).
+- `node test/plugin-test.mjs` — 54 arms, 0 failed, including a real `no_hwnd` refusal carrying no
+  effect and the three legal values round-tripping through the shipped projection.
+- `node scripts/check.mjs` — 12 gates green, including the marker end-to-end gate, which on this
+  machine's real desktop printed
+  `proof=pass [cursor=pass fg=pass focus=pass] :: effect=reported-by-send: a channel reported the call
+  returned -- 未独立验证`.
+
 ## 0.1.2 — 2026-11-20
 
 (Registry time `2026-11-20T17:15:15Z` UTC = `2026-11-21 01:15` Beijing; the date follows the same

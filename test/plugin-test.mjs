@@ -146,12 +146,44 @@ ok('a dead hwnd is returned as a refusal, not an exception', deadClick.ok === fa
 ok('the dead-hwnd refusal carries the engine code', deadClick.refusal === 'no_hwnd', String(deadClick.refusal));
 ok('the refusal text leads with the code, so a caller can branch on it', deadClick.text.startsWith('no_hwnd'), deadClick.text);
 
+// A REFUSAL HAS NO EFFECT TO REPORT: no action ran, so nobody can have reported success. Both
+// halves are asserted -- the text a model reads and the field a program reads -- because "no
+// effect= in the text" alone would still let a structural field leak out.
+ok("a refused click reports no effect in its text", !/effect=/.test(deadClick.text), deadClick.text);
+ok('a refused click carries no effect field at all', !('effect' in deadClick), JSON.stringify(Object.keys(deadClick)));
+
 const emptyType = await tool.execute({ action: 'type', hwnd: '1', text: '' });
 ok('an empty write is refused', emptyType.ok === false);
 ok('the empty-write refusal uses a real code', ['unreachable', 'no_hwnd'].includes(emptyType.refusal), String(emptyType.refusal));
 
 const missingArg = await tool.execute({ action: 'focus', hwnd: '1' });
 ok('a missing required argument is refused with a code', missingArg.ok === false, JSON.stringify(missingArg).slice(0, 160));
+
+// ---- the effect dimension reaches the caller (R1) -------------------------------------------
+// The engine has always computed `effect` (src/engine/engine.ps1); 0.1.2 dropped it on the floor, so
+// `proof=pass` could not be told apart from "the message was delivered and the app ignored it".
+// Asserted on the shipped projection with hand-authored engine results: no desktop involved, so this
+// arm cannot pass by luck.
+const EFFECTS = ['unverified', 'reported-by-send', 'reported-by-pattern'];
+{
+  const quietSamples = Array.from({ length: 12 }, (_, i) => ({
+    ts: 1000 + i * 20, cx: 40, cy: 60, fg: '1', focus: '2', inputAgeMs: 5000 + i * 20,
+  }));
+  for (const effect of EFFECTS) {
+    const projected = mod._internals.formatResult('click', {
+      channel: 'msg', tier: 'quiet', focusTaken: 'false', effect,
+      proofSamples: quietSamples, proofControl: quietSamples,
+    });
+    ok(`click result carries effect=${effect} in the text`, projected.text.includes(`effect=${effect}`),
+      projected.text);
+    ok(`  ... and structurally, with a legal value`, EFFECTS.includes(projected.effect), String(projected.effect));
+  }
+  // An engine result that never set effect must not invent a nicer word for itself.
+  const silent = mod._internals.formatResult('click', { channel: 'msg', tier: 'quiet' });
+  ok('a result with no effect defaults to unverified', silent.effect === 'unverified', String(silent.effect));
+  ok('  ... and a channel that reported nothing cannot read as proof=pass',
+    silent.proof !== 'pass', String(silent.proof));
+}
 
 // ---- the settings gate is server-side ------------------------------------------------------
 const offCtx = makeCtx();

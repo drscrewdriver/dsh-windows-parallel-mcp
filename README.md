@@ -1,10 +1,11 @@
 # dsh-windows-parallel-mcp
 
-> **0.1.2 — every real click now carries its own disturbance proof.** The name was reserved earlier
-> under a weaker claim (see [CHANGELOG.md](CHANGELOG.md)); the claim below is the measured one.
-> 0.1.1 is 0.1.0's behaviour with a corrected packaging chain; 0.1.2 adds the runtime proof chain —
-> `wpm click` returns a `proof=` verdict and `proofDimensions`, measured against the desktop around
-> your own call.
+> **0.1.3 — the proof now says who reported the success, not just that you were undisturbed.** The
+> name was reserved earlier under a weaker claim (see [CHANGELOG.md](CHANGELOG.md)); the claim below
+> is the measured one. 0.1.1 is 0.1.0's behaviour with a corrected packaging chain; 0.1.2 added the
+> runtime proof chain (`proof=` verdict and `proofDimensions`, measured against the desktop around
+> your own call); 0.1.3 adds the second half — `effect=` — and lets it enter the judgment, so a call
+> that accomplished nothing can no longer read as `proof=pass`.
 
 A DSH plugin that lets an agent drive **its own** Windows windows without moving your cursor. Where
 a window accepts a window message, you never lose focus at all. Where it only exposes UI Automation,
@@ -30,7 +31,9 @@ One tool, five actions:
 The engine picks the cheapest available door per call:
 
 - **quiet tier** — a classic child window receives the click/text as a window message. Measured:
-  0 foreground changes in 6 of 6 rounds, effect verified by the app's own state, cursor moved 0 px.
+  0 foreground changes in 6 of 6 rounds, cursor moved 0 px. (Those 6 rounds also read the target
+  app's own state to confirm the click landed — that was a *separate* experiment, not the `effect=`
+  field, which says only who reported the call returned; see the table below.)
 - **bounded-flash tier** — only UI Automation can reach the control, which raises the target. The
   engine records the focus table *before* acting, reverses it **once** afterwards, and never pulls
   focus from a window you chose. Measured net return **15–95 ms** from three independent
@@ -62,7 +65,7 @@ next step — see [docs/refusals.md](docs/refusals.md).
 verdict plus a `proofDimensions` field (cursor / foreground / focus). Around your call the engine
 samples cursor position, foreground window, keyboard focus and last-physical-input age — in a short
 pre-action control window (when, by construction, nothing was running) and inside the settle wait it
-already pays. The judgment is one pure function (`lib/proof-window.mjs`, unit-tested against 32
+already pays. The judgment is one pure function (`lib/proof-window.mjs`, unit-tested against 40
 synthetic windows whose answers are known by construction). What it honestly can and cannot say:
 a switch of foreground on a quiet tier fails — the control shows the desktop was not doing it, so it
 is the action's to explain; a cursor jump is *reported*, never accused, because with nothing running
@@ -71,6 +74,24 @@ this desktop's cursor showed multi-gap unexplained motion on its own (a re-runna
 gate asserts no shipped file contains `SetCursorPos`/`SendInput`/`mouse_event`/`keybd_event`, so a
 regression that adds cursor control fails at build time with certainty instead of being hunted at
 runtime among ambient motion.
+
+**And it says who reported the success.** Every action result carries `effect=` in the text and
+`effect` in the structured output. The three values are not degrees of confidence in the
+application — they name the speaker:
+
+| `effect` | who is speaking | it proves | it does **not** prove |
+|---|---|---|---|
+| `unverified` | nobody | nothing | anything |
+| `reported-by-send` | the window-message channel | the message was **delivered** | that the target app processed it |
+| `reported-by-pattern` | the UI Automation pattern call | the call **returned** without throwing | that the interface actually changed |
+
+Since 0.1.3 the effect also enters the judgment, which closes the one honest gap 0.1.2 still had:
+a still desktop could outvote a total no-op. A call whose channel reported nothing is capped at
+`inconclusive` — never `pass`. A batch caller that passes its per-attempt results (`actions`) gets
+`fail` when **no** attempt took effect, however few pixels moved. Displacement proves we did not
+disturb you; it never proves we accomplished anything. A single `reported-by-*` stays a `pass` with
+the caveat spelled out in the reason field (`未独立验证` — nobody observed the app), because turning
+weak-but-real evidence into a red would train its readers to ignore the verdict.
 
 ## What it does not do
 
