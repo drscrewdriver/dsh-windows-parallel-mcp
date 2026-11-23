@@ -1,8 +1,36 @@
 # Changelog
 
+**English** · [中文](CHANGELOG.zh.md) · [日本語](CHANGELOG.ja.md) · [한국어](CHANGELOG.ko.md) · [Français](CHANGELOG.fr.md) · [Deutsch](CHANGELOG.de.md) · [Italiano](CHANGELOG.it.md) · [Español](CHANGELOG.es.md) · [Português](CHANGELOG.pt.md) · [Русский](CHANGELOG.ru.md)
 Dates are the registry `time` values for each version, not git commit dates — a commit date records
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
+
+## 0.3.0 — pending publish
+
+> Registry `time` to be filled in after publish (this project dates versions by registry time, not
+> by commit date — see the header above). Do not ship this entry with a fabricated date.
+
+**Ten languages, and a typed public surface.** 0.2.0 was the capability release; 0.3.0 is the
+reachability release. The documentation now ships in the ten DSH ecosystem languages
+(`en zh ja ko fr de it ru es pt`), with a language bar on every document and 中文 as a first-class,
+one-click switch beside English. The two install cases are finally stated honestly: `desktop` is
+Electron-managed and can only be supplemented by hand with the built-in pnpm (never
+`dsh plugin add`), while non-desktop profiles accept both `dsh --profile ... plugin add` and
+`pnpm add`. A public `types/index.d.ts` now types every action, all thirteen refusal codes, and
+the takeover fields, verified by a strict `tsc --noEmit` consumer gate.
+
+### Added
+- 27 translated documents (9 languages × README/CHANGELOG/INSTALL) with a complete 10-language
+  language bar; English remains canonical.
+- `types/index.d.ts`: `WpmAction`, `WpmArgs`, `WpmResult`, `RefusalCode`, `KeyInputMode`,
+  `WpmWindow`, `WpmExec`, `WpmTool`, plus the module exports; `types` field and dual
+  `types`/`default` export condition.
+- Two gates: `check-i18n.mjs` (structure, not prose) and `check-types.mjs` (strict tsc consumer,
+  NAMED SKIP when no compiler is present).
+
+### Documentation
+- INSTALL rewritten to exactly two cases; pnpm `minimumReleaseAgeExclude` cooling-window guidance
+  added to every language.
 
 ## 0.2.0 — 2026-11-23
 

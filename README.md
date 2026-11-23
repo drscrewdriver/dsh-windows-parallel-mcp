@@ -1,5 +1,6 @@
 # dsh-windows-parallel-mcp
 
+**English** · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Português](README.pt.md) · [Русский](README.ru.md)
 > **0.2.0 — the promise changes shape, deliberately.** Through 0.1.x this plugin's claim was "no
 > physical input at all". 0.2.0 keeps that as the **default** and adds an **opt-in takeover tier**:
 > with `takeoverAllowed` on and `takeover:true` on the call, the real cursor is moved to the action

@@ -1,5 +1,6 @@
 # Install
 
+**English** · [中文](INSTALL.zh.md) · [日本語](INSTALL.ja.md) · [한국어](INSTALL.ko.md) · [Français](INSTALL.fr.md) · [Deutsch](INSTALL.de.md) · [Italiano](INSTALL.it.md) · [Español](INSTALL.es.md) · [Português](INSTALL.pt.md) · [Русский](INSTALL.ru.md)
 ## Requirements
 
 - Windows (the engine is a Windows PowerShell sidecar; there is no portability story and none is claimed)
@@ -9,33 +10,70 @@
 No Python, no `uv`, no MSVC runtime, no native module, no build step. The engine is four `.ps1` files
 driven over a JSON line protocol by one long-lived STA process, started on the first tool call.
 
-## Install into a profile
+## Install into a profile: two cases, not three
+
+There are exactly **two** cases — desktop and non-desktop. Choose the one that matches your host.
+
+### 1. Non-desktop profiles (web, and any named profile)
+
+Both routes work — pick either:
 
 ```bash
-dsh plugin --profile <profile> add dsh-windows-parallel-mcp
+dsh --profile <profile> plugin add dsh-windows-parallel-mcp
+```
+
+```bash
+pnpm add dsh-windows-parallel-mcp
 ```
 
 The host adds the package to the profile's `dsh.profile.bundles`; the bundle patch
 (`cordis.patch.yml`) inserts one row (`id: windows-parallel`). Nothing else is mounted or replaced.
 
-To install from a local build, pack first and install the tarball -- this is also how the
-profile's other local-development plugins are mounted, and it matters for more than tidiness:
+### 2. The desktop profile (Electron-managed) — manual, pnpm only
+
+The `desktop` profile is owned by the Electron application. **Do not use `dsh plugin add` for it** —
+the CLI refuses every command against `desktop`, including read-only ones, with
+`profile "desktop" is managed exclusively by the Electron application`. There is no CLI path here.
+
+Install it manually with **pnpm only** — specifically the desktop app's **built-in pnpm** (the
+`desktopPnpm` service, not the pnpm on your PATH). The supported sequence:
 
 ```bash
-npm pack --ignore-scripts                       # -> dsh-windows-parallel-mcp-0.1.1.tgz
-dsh plugin --profile <profile> add /abs/path/to/dsh-windows-parallel-mcp-0.1.1.tgz
+# 1. Back up the profile manifests and the installed package directory first.
+# 2. Add the dependency with the built-in pnpm and refresh the lockfile.
+# 3. Restart DSH so the new bundle is composed at startup.
 ```
+
+A pinned lockfile must be changed surgically: a freshly published package is rejected from the
+lockfile while it is inside pnpm's `minimumReleaseAge` cooling window. Add the exact version to the
+profile's `pnpm-workspace.yaml`:
+
+```yaml
+minimumReleaseAgeExclude:
+  - dsh-windows-parallel-mcp@<version>   # e.g. 0.2.0
+```
+
+Without that line, `pnpm install --frozen-lockfile` fails with
+`dsh-windows-parallel-mcp@<version> was published at ... within the minimumReleaseAge cutoff`.
+
+### Installing from a local build (both cases)
+
+Pack first, then install the tarball — this is also how the profile's other local-development
+plugins are mounted:
+
+```bash
+npm pack --ignore-scripts                       # -> dsh-windows-parallel-mcp-<version>.tgz
+```
+
+For non-desktop profiles, pass the tarball to `dsh --profile <profile> plugin add <tgz>`.
+For desktop, unpack the tarball over the installed package directory (after backing it up).
 
 A `link:` install keeps the package's REAL path outside the profile tree, and Node resolves bare
 peer specifiers (`@deepseek-ai/schemastery`) upward from the real path -- so the peers never
 resolve, the settings form silently disappears, and the plugin falls to its shim. A `file:` tarball
 installs as a real directory inside the profile and the peers resolve exactly like every other
-plugin. This was measured, not inferred: `link:` -> `config schema: local-standard-schema-shim`,
+plugin. Measured, not inferred: `link:` -> `config schema: local-standard-schema-shim`,
 `file:` -> `config schema: @deepseek-ai/schemastery`.
-
-The desktop profile is managed by the Electron app; `dsh plugin --profile desktop ...` only works
-through the desktop-bundled CLI (`resources/runtime/cli/bin/dsh.cmd`), and a profile with a pinned
-lockfile should be changed surgically rather than by any command that re-resolves the whole graph.
 
 ## Verify it actually activated
 

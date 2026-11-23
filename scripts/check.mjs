@@ -182,6 +182,19 @@ pass = run('uia click acts on the point (two buttons, app-side oracle)', () => {
   return { ok: r.status === 0, out: notable.length ? `${tail} | ${notable.join(' | ')}` : tail };
 }) && pass;
 
+// The public type surface is a shipped promise too. Named SKIP when no compiler is present.
+pass = run('typescript consumer (tsc --noEmit)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-types.mjs'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
+// Ten-language documentation is a shipped promise: a missing sibling link or a stale install path
+// teaches the wrong command. Cheap structural gate, runs before the syntax sweep.
+pass = run('i18n docs (10 languages x 3 docs)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-i18n.mjs'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 const js = [].concat(...roots.map((rt) => walk(rt, ['.mjs', '.js'])));
 const jsFail = [];
 for (const f of js) {

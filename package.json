@@ -1,6 +1,6 @@
 {
   "name": "dsh-windows-parallel-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public",
     "tag": "latest"
@@ -28,8 +28,9 @@
   },
   "type": "module",
   "main": "lib/index.js",
+  "types": "types/index.d.ts",
   "exports": {
-    ".": "./lib/index.js",
+    ".": { "types": "./types/index.d.ts", "default": "./lib/index.js" },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./dsh.plugin.json": "./dsh.plugin.json",
     "./src/engine/*": "./src/engine/*",
@@ -37,6 +38,7 @@
   },
   "files": [
     "lib/",
+    "types/",
     "src/engine/",
     "src/schema/",
     "docs/refusals.md",
@@ -45,7 +47,34 @@
     "cordis.patch.yml",
     "dsh.plugin.json",
     "INSTALL.md",
-    "README.md"
+    "README.md",
+    "INSTALL.ru.md",
+    "CHANGELOG.ru.md",
+    "README.ru.md",
+    "INSTALL.pt.md",
+    "CHANGELOG.pt.md",
+    "README.pt.md",
+    "INSTALL.es.md",
+    "CHANGELOG.es.md",
+    "README.es.md",
+    "INSTALL.it.md",
+    "CHANGELOG.it.md",
+    "README.it.md",
+    "INSTALL.de.md",
+    "CHANGELOG.de.md",
+    "README.de.md",
+    "INSTALL.fr.md",
+    "CHANGELOG.fr.md",
+    "README.fr.md",
+    "INSTALL.ko.md",
+    "CHANGELOG.ko.md",
+    "README.ko.md",
+    "INSTALL.ja.md",
+    "CHANGELOG.ja.md",
+    "README.ja.md",
+    "INSTALL.zh.md",
+    "CHANGELOG.zh.md",
+    "README.zh.md"
   ],
   "dsh": {
     "bundle": {
