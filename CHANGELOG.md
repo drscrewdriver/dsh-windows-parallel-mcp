@@ -112,6 +112,10 @@ What replaced it, with each part tested for non-vacuity:
 - Non-vacuity was proven by injection, not asserted: the rect comparison rejects the `GetWindowRect`
   rect and a +10px shift; a generated all-white PNG reads blank; the frame predicate says yes to the
   measured pair and no to a frame that pokes outside it; every structural mutation turns its gate red.
+- The `CHANGELOG.md` **inside the 0.5.0 tarball** still carries the pre-publish "working date" line,
+  because the tarball is frozen at publish time and the registry time was written back afterwards.
+  This entry (in the repository) carries the real one: `2026-11-23T14:19:37.293Z`. The same
+  retroactivity applied to 0.4.0's README, and is recorded there for the same reason.
 - Two things this release did **not** fix, stated rather than hidden:
   - This host's `UIAutomationClient` has no `LegacyIAccessiblePattern` type at all (measured:
     `Unable to find type`), so any target that exposes only the MSAA bridge — WinForms among them —
