@@ -5,23 +5,21 @@
 > Плагин DSH, позволяющий агенту управлять **своими** окнами Windows — по умолчанию тихо, по запросу видимо. Когда окно принимает сообщения Windows, фокус никогда не перехватывается. Когда доступен только UI Automation, фокус претерпевает одну ограниченную вспышку и автоматически возвращается. При явном запросе режима takeover курсор перемещается в точку действия и всегда восстанавливается, а HUD предлагает три способа прерывания. Во всех остальных случаях действие отклоняется с кодом и причиной.
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **0.2.0 — the promise changes shape, deliberately.** Through 0.1.x this plugin's claim was "no
-> physical input at all". 0.2.0 keeps that as the **default** and adds an **opt-in takeover tier**:
-> with `takeoverAllowed` on and `takeover:true` on the call, the real cursor is moved to the action
-> point (so you can see where the agent points) and always restored, the focus is held for the
-> duration, and a three-phase HUD with a stop button and a global abort key is mandatory. Keyboard
-> injection exists only inside that tier, only when asked (`keyInput:"inject"`), and only for
-> targets with no other door — and, measured, it does **not** work on this host's terminal, so the
-> terminal stays refused rather than becoming a promise. Both gates default off: an upgrade cannot
-> start moving your cursor by itself. 0.1.6 split `unreachable` into `uia_tree_empty` and
-> `uia_probe_failed`; 0.1.5 made a click act on the point it names; 0.1.3 added `effect=` — who
-> reported the success — and let it enter the judgment. Full history: [CHANGELOG.md](CHANGELOG.md).
+> **Current release: 0.4.0** — this document describes the contract as of that version. What
+> changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
 on request. Where a window accepts a window message, you never lose focus at all. Where it only
 exposes UI Automation, you lose focus for one bounded flash that is reversed automatically. Where you
 explicitly ask for the takeover tier, the cursor moves to the point and is always restored, with a
-HUD that can stop it three ways. Everywhere else it refuses, with a code and a reason.
+HUD that can stop it three ways. Everywhere else it refuses, with a code and a reason — never with
+silence: every refusal carries a code from a closed set of thirteen and the next step.
+
+**The takeover tier defaults off, and that is structural.** The cursor is only ever moved because you
+opened `takeoverAllowed` **and** asked for it on the call (`takeover:true`), so an upgrade cannot
+start moving your cursor by itself. Keyboard injection lives inside that tier only, only when asked
+(`keyInput:"inject"`), and only for targets with no other door — and, measured, it does **not** work
+on this host's terminal, so the terminal stays refused rather than becoming a promise.
 
 Source, the measurement scripts behind every number below, and the release history live at
 **<https://github.com/drscrewdriver/dsh-windows-parallel-mcp>** — issues are the right place for
@@ -187,6 +185,29 @@ call, not at plugin load.
 
 `engines.dsh` is an explicit two-sided range. There is no runtime version probing and no silent
 degradation.
+
+## Typed surface
+
+`types/index.d.ts` is written by hand, not emitted from an implementation. It covers the whole
+contract: the five actions, every argument including the takeover fields, and all thirteen refusal
+codes as a closed union.
+
+Its wiring is measured in both resolution modes a consumer can use, rather than assumed from the
+presence of a file:
+
+- a `nodenext` consumer resolves it through the `types` condition inside `exports`. That condition is
+  load-bearing: delete it and the same consumer fails with `TS7016`, because once `exports` exists it
+  is the only entry point and the legacy field below is never consulted;
+- a classic resolver falls back to the top-level `types` field. Delete `exports` entirely and the
+  consumer still type-checks.
+
+Neither field is decoration, so neither is removable on the assumption that the other covers it.
+
+The declarations are also checked against the implementation, in the direction that catches drift:
+`lib/` is type-checked under `allowJs + checkJs + strict` **against those same declarations**, so
+renaming a field in one without the other fails a repo gate instead of a user's build. This stays
+inside the package's zero-install-dependency promise — the compiler is borrowed from the workspace
+when one is present, and the gate reports a named SKIP rather than a red when one is not.
 
 ## Settings
 
