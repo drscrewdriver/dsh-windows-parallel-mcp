@@ -1,4 +1,4 @@
-﻿# worker.ps1 -- the sidecar's line protocol: one JSON request in, one JSON response out.
+# worker.ps1 -- the sidecar's line protocol: one JSON request in, one JSON response out.
 #
 # WHY A WORKER AND NOT A DIRECT CALL. Two constraints collide in this process model:
 #   * UIA COM wants a single-threaded apartment (powershell.exe -STA), and
@@ -123,21 +123,80 @@ while ($true) {
         Write-Response $id @{ id = $id; ok = $true; result = @{ paused = $on } }
       }
       'click' {
+        # R3: takeover/keyInput travel as explicit request fields. The HOST half is what enforces the
+        # settings gates (lib/index.js) and strips these fields when a gate is off, so a request that
+        # arrives here with takeover=true was already authorised; the engine still re-checks the HUD.
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action click `
           -X ([int](Get-Arg $req 'x' -1)) -Y ([int](Get-Arg $req 'y' -1)) `
-          -SettleMs ([int](Get-Arg $req 'settleMs' 350))
+          -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
+          -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
+          -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000)) `
+          -KeyInject:([bool](([string](Get-Arg $req 'keyInput' 'none')) -eq 'inject')) `
+          -TakeoverArmMs ([int](Get-Arg $req 'takeoverArmMs' 800)) `
+          -HudDoneMs ([int](Get-Arg $req 'hudDoneMs' 1500))
         Write-Response $id @{ id = $id; ok = $true; result = $r }
       }
       'type' {
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action type `
           -Text ([string](Get-Arg $req 'text' '')) -ElementName ([string](Get-Arg $req 'elementName' '')) `
-          -Replace:([bool](Get-Arg $req 'replace' $false)) -SettleMs ([int](Get-Arg $req 'settleMs' 350))
+          -Replace:([bool](Get-Arg $req 'replace' $false)) -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
+          -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
+          -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000)) `
+          -KeyInject:([bool](([string](Get-Arg $req 'keyInput' 'none')) -eq 'inject')) `
+          -TakeoverArmMs ([int](Get-Arg $req 'takeoverArmMs' 800)) `
+          -HudDoneMs ([int](Get-Arg $req 'hudDoneMs' 1500))
         Write-Response $id @{ id = $id; ok = $true; result = $r }
       }
       'focus' {
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action focus `
-          -ElementName ([string](Get-Arg $req 'elementName' '')) -SettleMs ([int](Get-Arg $req 'settleMs' 350))
+          -ElementName ([string](Get-Arg $req 'elementName' '')) -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
+          -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
+          -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000))
         Write-Response $id @{ id = $id; ok = $true; result = $r }
+      }
+      'hud' {
+        # Product surface for tests and for the owner: start/stop the HUD on its own, so its window
+        # properties can be measured without an action in flight (test/hud-test.ps1).
+        . (Join-Path $EngineRoot 'hud.ps1')
+        $on = [bool](Get-Arg $req 'on' $true)
+        if ($on) {
+          $r = Start-WpmHud -Action ([string](Get-Arg $req 'action' 'hud')) -MaxMs ([int](Get-Arg $req 'maxMs' 10000)) -ArmMs ([int](Get-Arg $req 'armMs' 0))
+          $st = if ($r.state) { $r.state } else { Get-WpmHudState -WaitMs 100 }
+        } else {
+          $r = Stop-WpmHud
+          $st = $r.state
+        }
+        Write-Response $id @{ id = $id; ok = $true; result = @{ hud = $st } }
+      }
+      'takeover' {
+        # Alias of 'hud' on purpose: the HUD IS the takeover precondition, so "takeover on" and "hud on"
+        # are the same operation. Reported separately from the settings gate, which lives in the host.
+        . (Join-Path $EngineRoot 'hud.ps1')
+        $on = [bool](Get-Arg $req 'on' $true)
+        if ($on) {
+          $r = Start-WpmHud -Action 'takeover' -MaxMs ([int](Get-Arg $req 'maxMs' 10000)) -ArmMs 0
+          $st = if ($r.state) { $r.state } else { Get-WpmHudState -WaitMs 100 }
+        } else {
+          $r = Stop-WpmHud
+          $st = $r.state
+        }
+        Write-Response $id @{ id = $id; ok = $true; result = @{ hud = $st; stance = 'takeover requires the host setting takeoverAllowed; the HUD is the hard precondition' } }
+      }
+      'abort' {
+        # IMMEDIATE ANSWER, and it must not wait for anything. This is the host's signal -> worker path;
+        # the FILE latch is the path the engine actually polls, so both are written here and the answer
+        # goes out before any cleanup work could delay it.
+        . (Join-Path $EngineRoot 'takeover.ps1')
+        [WpmCtl]::TakeoverAbort = $true
+        $latch = Get-WpmTakeoverLatchPath
+        $written = $false
+        try {
+          $dir = Split-Path -Parent $latch
+          if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+          Set-Content -LiteralPath $latch -Value 'abort' -Encoding ASCII -ErrorAction Stop
+          $written = $true
+        } catch { }
+        Write-Response $id @{ id = $id; ok = $true; result = @{ aborted = $true; latch = $latch; latchWritten = $written; flagSet = [bool][WpmCtl]::TakeoverAbort } }
       }
       'ping' {
         # `text` is echoed back verbatim. That is not decoration: the protocol's encoding is a real

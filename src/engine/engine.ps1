@@ -1,4 +1,4 @@
-# engine.ps1 -- the only place where a decision becomes a syscall.
+﻿# engine.ps1 -- the only place where a decision becomes a syscall.
 #
 # One entry point, Invoke-WpmAction, and it always returns a result object rather than throwing on
 # a refusal: 'refused' is a normal outcome of this product, not an error path, and R3.2 requires
@@ -45,11 +45,18 @@ function Get-WpmStatus {
     # Ctrl+Alt+Q promise untrue with no way to notice.
     overlayRunning = [bool][WpmCtl]::OverlayOn
     overlayHwnd = [string][WpmCtl]::OverlayHwnd
+    # The HUD travels with status for the same reason the overlay does: "the takeover surface exists"
+    # must be checkable by the owner and by an independent oracle, not inferred from a successful call.
+    hudOn = [bool][WpmCtl]::HudOn
+    hudHwnd = [string][WpmCtl]::HudHwnd
+    hudPhase = [string][WpmCtl]::HudPhase
+    abortChord = [string][WpmCtl]::AbortChordLabel
+    abortRequested = [bool][WpmCtl]::TakeoverAbort
     hotkeyRegistered = [bool][WpmCtl]::HotkeyOk
     hotkeyLabel = [string][WpmCtl]::HotkeyLabel
     overlayReason = [string][WpmCtl]::Reason
     dpiAware = [bool]$script:WpmDpiAware
-    stance = 'no physical injection; no forged-Alt foreground trick'
+    stance = 'quiet tier: no physical input at all; takeover tier (opt-in, HUD mandatory): cursor moves and is always restored, keyboard typed only when asked, three interrupt paths, no mouse injection'
   }
 }
 
@@ -140,7 +147,16 @@ function Invoke-WpmAction {
     [string]$Text = '',
     [string]$ElementName = '',
     [switch]$Replace,
-    [int]$SettleMs = 350
+    [int]$SettleMs = 350,
+    # ---- R3 ------------------------------------------------------------------------------------
+    # Takeover is a REQUEST with preconditions, never a flag that silently upgrades an action
+    # (spec.md §4). TakeoverArmMs is the cancellation window; HudDoneMs is how long the "returned"
+    # phase stays on screen before the HUD is torn down.
+    [switch]$Takeover,
+    [int]$TakeoverMaxMs = 10000,
+    [switch]$KeyInject,
+    [int]$TakeoverArmMs = 800,
+    [int]$HudDoneMs = 1500
   )
   $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $h = [IntPtr][int64]$Hwnd
@@ -149,6 +165,10 @@ function Invoke-WpmAction {
     refusal = ''; reason = ''; detail = ''; latencyMs = 0
     focusTaken = 'false'; restoreOutcome = ''; restoreSetFg = ''; restoreJoined = ''
     effect = 'unverified'; proofSamples = @()
+    # R3 fields. Empty strings rather than $null so the host half can test truthiness without
+    # distinguishing "not a takeover" from "a takeover that said nothing".
+    takeover = 'false'; cursorMoved = ''; cursorRestored = ''; takeoverMs = 0
+    abortChord = ''; keysInjected = 0; injectedChars = 0
   }
 
   # A QUERY IS NOT AN ACTION, and this branch is early on purpose. It used to sit inside the action
@@ -190,11 +210,85 @@ function Invoke-WpmAction {
     # to raise the window would report the cheap tier for the expensive action.
     $facts.messageDoor = $false
   }
+  # ---- R3: the takeover request, and the HUD that must exist BEFORE the table can approve it ----
+  # Order is the safety design: cheap disqualifiers first (a paused or elevated refusal must never spawn
+  # a window), then the HUD, then the full decision. $Facts.hudReady is therefore a MEASUREMENT of the
+  # HUD that was actually started, not an assumption that "we are about to start one".
+  $facts.takeoverRequested = [bool]$Takeover
+  $facts.keyInjectRequested = [bool]$KeyInject
+  $facts.keyInjectAllowed = [bool]$KeyInject     # the host gate already stripped the field when off
+  $facts.hudReady = $false
+  $facts.foregroundIsTarget = $false
+  $preFacts = $facts.Clone()
+  $preFacts.takeoverRequested = $false
+  $preFacts.keyInjectRequested = $false
+  $pre = Get-WpmChannelDecision $preFacts
+  if ($pre.channel -eq 'refuse' -and (@('paused', 'no_hwnd', 'elevated_target') -contains $pre.refusal)) {
+    $result.refusal = $pre.refusal; $result.reason = $pre.reason
+    $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+    return $result
+  }
+  # BEFORE ANY RAISE. If the injection path has to bring the target forward, the focus table must be
+  # captured first, or the raise looks like a third party's and would never be reversed.
+  $entry = Get-WpmFocusEntry
+  $hudStarted = $false
+  $raisedByUs = $false
+  if ($facts.takeoverRequested) {
+    # G2: the two primitive modules are dot-sourced INSIDE this branch and nowhere else. The quiet and
+    # bounded-flash tiers never even load SetCursorPos/SendInput into the session.
+    . (Join-Path $PSScriptRoot 'takeover.ps1')
+    . (Join-Path $PSScriptRoot 'input-inject.ps1')
+    . (Join-Path $PSScriptRoot 'hud.ps1')
+    # A CANCELLATION THAT ARRIVES DURING SETUP MUST NOT BE THROWN AWAY. The host writes the latch as soon as
+    # the signal fires, and setup (module load + HUD start) can take longer than that. Clearing the latch
+    # unconditionally at this point would delete a cancellation that was meant for THIS call -- measured
+    # with test/signal-test.mjs: the abort landed, the latch was written, and the action ran to completion.
+    # So: snapshot, then clear (a stale latch from a crashed action must not poison every later call), then
+    # honour what was found.
+    $preAborted = Test-WpmTakeoverAbort
+    Reset-WpmTakeoverAbort | Out-Null
+    $armClamped = [Math]::Max(0, [Math]::Min(5000, $TakeoverArmMs))
+    $maxClamped = [Math]::Max(500, [Math]::Min(60000, $TakeoverMaxMs))
+    $hud = Start-WpmHud -Action $Action -MaxMs $maxClamped -ArmMs $armClamped
+    $hudStarted = [bool]$hud.ready
+    $facts.hudReady = $hudStarted
+    if ($facts.keyInjectRequested -and $hudStarted -and -not $facts.elevatedTarget) {
+      # S1: SendInput writes to the FOREGROUND window. One raise attempt through the same input-queue
+      # unlock the focus restore uses, then re-measure -- a decision made now is evidence; a decision
+      # made 800ms ago is not.
+      $fg0 = Test-WpmTargetForeground -Hwnd $Hwnd
+      if (-not $fg0.ok) {
+        $raised = [WpmWin]::RestoreForeground([IntPtr]$h)
+        if ($raised -like 'true*') { $raisedByUs = $true }
+        Start-Sleep -Milliseconds 60
+      }
+      $fg1 = Test-WpmTargetForeground -Hwnd $Hwnd
+      $facts.foregroundIsTarget = [bool]$fg1.ok
+    }
+  }
   $decision = Get-WpmChannelDecision $facts
+  # G3, and not ceremony: the HUD runs on its own thread and can fail between Start-WpmHud and here. The
+  # decision approved takeover on a fact measured a moment ago; re-measure before a primitive exists in
+  # the call path. scripts/check-takeover-path.mjs asserts this check sits between the branch entry and
+  # every call to Set-WpmCursorTakeover / Send-WpmKeyText.
+  if ($facts.takeoverRequested -and $decision.tier -eq 'takeover' -and -not (Test-WpmHudReady)) {
+    if ($hudStarted) { [void](Stop-WpmHud) }
+    $result.refusal = 'takeover_unavailable'
+    $result.reason = $script:WpmRefusals.takeover_unavailable + ' [the HUD stopped between start and arming]'
+    $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+    return $result
+  }
+  if ($raisedByUs -and -not $decision.needsRestore) {
+    # We moved the owner's foreground for the injection; the same table that reverses a UIA flash has to
+    # reverse this too, or "we only borrow what we give back" would have a hole exactly where the
+    # loudest primitive is.
+    $decision.needsRestore = $true
+  }
 
   $result.channel = $decision.channel; $result.tier = $decision.tier
   $result.family = $probe.family; $result.cls = $probe.cls
   if ($decision.channel -eq 'refuse') {
+    if ($hudStarted) { [void](Stop-WpmHud) }
     $result.refusal = $decision.refusal; $result.reason = $decision.reason
     # A refusal that says only 'unreachable' makes the reader guess which of two very different
     # things happened. When the point probe ran, it knows: the point is outside the target, or the
@@ -212,10 +306,9 @@ function Invoke-WpmAction {
     return $result
   }
 
-  # Capture the focus table BEFORE the action when the tier may cost a flash. For the quiet tier it
-  # is still captured, because 'the quiet channel did not take focus' is a claim that needs a
-  # before-value to be falsifiable.
-  $entry = Get-WpmFocusEntry
+  # The focus table was captured above (before any raise). For the quiet tier it is still needed,
+  # because 'the quiet channel did not take focus' is a claim that needs a before-value to be
+  # falsifiable.
   $raisedHwnd = ''
   # THE PRE-ACTION CONTROL WINDOW. Sampled here, immediately BEFORE the door call, so that during it,
   # by construction, WE have done nothing. WHY A CONTROL IS REQUIRED AND NOT JUST A THRESHOLD:
@@ -231,8 +324,54 @@ function Invoke-WpmAction {
   $controlSamples = Get-WpmProofWindow -Ms 80
   $tAct = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 
+  # ---- the takeover choreography (spec.md §3) -------------------------------------------------
+  # Everything from here to the finally exists because R3 promises three things the quiet tier never
+  # did: the pointer move is VISIBLE (so the owner is warned before it costs them anything), the
+  # pointer is ALWAYS returned, and the whole thing can be interrupted from three different places.
+  $takeover = ($decision.tier -eq 'takeover')
+  $cursorEntry = $null
+  $abortedBeforeAct = $false
+  $abortedByPause = $false
+  $abortedDuringSetup = $false
+  # $preAborted is NOT re-initialised here: it was snapshotted before Reset-WpmTakeoverAbort cleared the
+  # flag, and re-zeroing it at this point silently discarded a cancellation that arrived during setup.
+  # (Measured by test/signal-test.mjs -- the abort landed, the latch existed, and the action still ran.)
+  $takeoverStartMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  if ($takeover) {
+    $result.takeover = 'true'
+    if ($preAborted) { $abortedBeforeAct = $true; $abortedDuringSetup = $true }
+    $result.hudHwnd = [string][WpmCtl]::HudHwnd
+    # ARMING is a real cancellation window, not a sleep: all three interruption paths are read every
+    # 50ms, and the HUD clock is updated so a long arming still shows progress.
+    $armMs = [Math]::Max(0, [Math]::Min(5000, $TakeoverArmMs))
+    $armDeadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + $armMs
+    Set-WpmHudPhase -Phase 'arming' -Action $Action -MaxMs $TakeoverMaxMs -ElapsedMs 0 | Out-Null
+    while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $armDeadline) {
+      # C12: the PAUSE switch is an interruption too, not a flag only read at decision time. The owner can
+      # press it while the HUD is counting, and the promise is "stops now", not "stops next time".
+      if (Test-WpmTakeoverAbort) { $abortedBeforeAct = $true; break }
+      if ([WpmCtl]::Paused) { $abortedBeforeAct = $true; $abortedByPause = $true; break }
+      Set-WpmHudPhase -Phase 'arming' -ElapsedMs ([int]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $takeoverStartMs)) | Out-Null
+      Start-Sleep -Milliseconds 50
+    }
+    if (-not $abortedBeforeAct) { Set-WpmHudPhase -Phase 'active' | Out-Null }
+  }
+
   try {
-    if ($decision.channel -eq 'message') {
+    # THE CURSOR MOVE LIVES INSIDE THE SAME try THAT OWNS THE RESTORE (spec.md §6 G4): an exception in
+    # the door call below still reaches the finally that puts the pointer back.
+    if ($takeover -and -not $abortedBeforeAct -and $Action -eq 'click' -and $X -ge 0 -and $Y -ge 0) {
+      $cursorEntry = Set-WpmCursorTakeover -X $X -Y $Y
+      $result.cursorMoved = if ($cursorEntry.applied) { 'true' } else { 'false' }
+      $result.cursorX = [int]$cursorEntry.x
+      $result.cursorY = [int]$cursorEntry.y
+      $result.cursorBeforeX = [int]$cursorEntry.beforeX
+      $result.cursorBeforeY = [int]$cursorEntry.beforeY
+    }
+    if ($abortedBeforeAct) {
+      $result.refusal = 'takeover_aborted'
+      $result.reason = if ($abortedByPause) { 'the owner paused the engine during the arming window; nothing was clicked or typed' } elseif ($abortedDuringSetup) { 'cancelled by the host before the arming window opened; nothing was clicked or typed' } else { 'interrupted during the arming window; nothing was clicked or typed' }
+    } elseif ($decision.channel -eq 'message') {
       if ($Action -eq 'type') {
         # The door kind is decided ONCE, in the probe (win.ps1), and consumed here by kind.
         # This path used to re-match class names with its own copy of the pattern -- and that copy
@@ -265,6 +404,29 @@ function Invoke-WpmAction {
         $r = [WpmWin]::MessageClick($child, $X, $Y)
         $result.detail = "msg=$r child=$($child.ToInt64())"
         $result.effect = 'reported-by-send'
+      }
+    } elseif ($decision.channel -eq 'input') {
+      # THE MEASURED DOORLESS CASE (a terminal, findings §B): typing into the FOREGROUND window. The
+      # foreground assertion is repeated here, at the moment of sending, because the desktop can change
+      # during the arming window -- the decision's fact is evidence about then, not about now.
+      $fgNow = Test-WpmTargetForeground -Hwnd $Hwnd
+      if (-not $fgNow.ok) {
+        $result.refusal = 'keyinject_unavailable'
+        $result.reason = $script:WpmRefusals.keyinject_unavailable + ' [foreground at send time: ' + $fgNow.foreground + ']'
+      } else {
+        # The pause switch rides the same abort probe: a long injection must stop when the owner says so.
+        $inj = Send-WpmKeyText -Text $Text -ShouldAbort { (Test-WpmTakeoverAbort) -or [WpmCtl]::Paused }
+        $result.detail = 'inject=unicode chars=' + $inj.chars + ' events=' + $inj.sent
+        $result.keysInjected = [int]$inj.sent
+        $result.injectedChars = [int]$inj.chars
+        $result.effect = if ($inj.chars -gt 0) { 'reported-by-send' } else { 'unverified' }
+        if ($inj.aborted) {
+          $result.refusal = 'takeover_aborted'
+          $result.reason = $inj.reason
+        } elseif (-not $inj.ok) {
+          $result.refusal = 'keyinject_unavailable'
+          $result.reason = $inj.reason
+        }
       }
     } elseif ($Action -eq 'focus') {
       # Focusing a control is a real operation an agent needs (type into a field, then read it).
@@ -314,6 +476,37 @@ function Invoke-WpmAction {
     $result.refusal = 'action_failed'
     $result.reason = 'the channel call threw: ' + $_.Exception.Message
     $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+  } finally {
+    # THE BORROWED POINTER IS RETURNED HERE, UNCONDITIONALLY. Success, exception, refusal and
+    # interruption all arrive at this block, which is the whole reason the move was placed inside the
+    # try above. 'restored' is the READ-BACK, not the intent: a restore the OS refused reports
+    # cursorRestored=false and becomes a hard proof failure downstream (spec.md §6, C5).
+    if ($takeover) {
+      if ($cursorEntry) {
+        $cur = Restore-WpmCursorTakeover -Entry $cursorEntry
+        $result.cursorRestored = if ($cur.restored) { 'true' } else { 'false' }
+        $result.cursorAfterX = [int]$cur.x
+        $result.cursorAfterY = [int]$cur.y
+        if (-not $cur.restored) { $result.cursorRestoreReason = $cur.reason }
+      } else {
+        # No click point, so nothing was borrowed: the honest report is restored=true with moved=false.
+        $result.cursorRestored = 'true'
+      }
+      $result.injectedChars = [int][WpmCtl]::InjectedChars
+      $result.abortChord = [string][WpmCtl]::AbortChordLabel
+      $result.takeoverMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $takeoverStartMs
+      if ($TakeoverMaxMs -gt 0 -and $result.takeoverMs -gt $TakeoverMaxMs) {
+        $result.takeoverNote = 'the action exceeded takeoverMaxMs=' + $TakeoverMaxMs + '; it was still restored'
+      }
+      # A LATCH LEFT BEHIND WOULD ABORT THE NEXT CALL. The host clears its own copy on dispose, but the
+      # worker pid outlives a single action, so the engine clears it here as well -- after the restore, so
+      # an interruption that arrives during cleanup is still visible to this action's own accounting.
+      Reset-WpmTakeoverAbort | Out-Null
+      Set-WpmHudPhase -Phase 'done' -ElapsedMs ([int]$result.takeoverMs) | Out-Null
+      $dwell = if ($result.refusal) { 120 } else { [Math]::Max(0, [Math]::Min(5000, $HudDoneMs)) }
+      if ($dwell -gt 0) { Start-Sleep -Milliseconds $dwell }
+      [void](Stop-WpmHud)
+    }
   }
 
   # THE ACTION WINDOW. Sampled DURING the settle sleep the engine already performed, so collecting

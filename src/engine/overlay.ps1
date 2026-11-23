@@ -1,4 +1,4 @@
-﻿# overlay.ps1 -- the product's visible surface: an AI marker that never takes the foreground,
+# overlay.ps1 -- the product's visible surface: an AI marker that never takes the foreground,
 # and a global hotkey that pauses the engine server-side. (task_54)
 #
 # WHAT THIS IS FOR. Two README claims need a real surface:
@@ -84,6 +84,12 @@ try {
   $win.WindowStartupLocation = [System.Windows.WindowStartupLocation]::Manual
   $win.ShowInTaskbar = $false
   $win.Topmost = $true
+  # THE MARKER HAD A WHITE SQUARE BEHIND IT, and the cause was an omission, not a style: AllowsTransparency
+  # makes the window's pixels able to show what is underneath, but a WPF Window's DEFAULT background is
+  # SystemColors.WindowBrush (white), so the 22px window painted an opaque white tile and the ring sat
+  # inside it. Only the ellipse is drawn; the rest of the surface must be explicitly transparent or it
+  # keeps the default brush. (hud.ps1 always set its background, which is why the HUD never showed this.)
+  $win.Background = [System.Windows.Media.Brushes]::Transparent
   $win.Opacity = 0.85
 
   $ring = [System.Windows.Shapes.Ellipse]::new()

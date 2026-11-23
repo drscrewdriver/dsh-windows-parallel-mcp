@@ -4,6 +4,94 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.2.0 — 2026-11-23
+
+> Date note: this entry is written before publishing, so the date is the working date. The file's own
+> rule is that a released version carries the registry `time` value — replace this line at publish time
+> (task_36/task_37 in the plan) rather than leaving a commit date here.
+
+**The promise changes shape, so the version changes major-minor.** 0.1.x said: no physical input at
+all, ever. That was true and cheap to enforce by absence. 0.2.0 keeps it as the DEFAULT and adds an
+opt-in tier that can move the cursor and type into the foreground window — which means the old claim
+cannot stay as written, and a release that quietly kept the old wording would be the exact failure
+mode this project keeps writing gates against.
+
+### Added — the takeover tier (`takeover:true`)
+
+- **A fourth tier.** `quiet` (window messages) and `bounded-flash` (UIA pattern, one reversed flash)
+  are unchanged. `takeover` is entered only by an explicit request AND with both settings gates on;
+  it places the real cursor on the action point, holds the focus for the duration, and always
+  restores. `refuse` is unchanged.
+- **The HUD's phase is a colour, not a sentence.** `arming` is amber, `active` red, `done` green —
+  encoded twice (whole surface tint + a 5px accent bar) because the owner is looking at the target
+  window, not at a 470×104 window in the corner. `test/hud-test.ps1` asserts it from the real pixels
+  (C18, five arms: each phase's dominant hue, all three distinct, and the surface tint changing too).
+- **A three-phase HUD as a hard precondition.** `arming` (default 800 ms, cancellable) → `active`
+  (elapsed/limit clock and injected-character count) → `done`. `WS_EX_TOPMOST|WS_EX_NOACTIVATE`,
+  `ShowActivated=false`, measured to leave `GetForegroundWindow()` unchanged. Empty space is
+  click-through via a `WNDPROC` subclass returning `HTTRANSPARENT`; the button stays clickable.
+  No HUD ⇒ `takeover_unavailable`, never a silent takeover.
+- **Three interruption paths, one flag.** HUD stop button, a global abort chord (candidates from
+  `Ctrl+Alt+X`; the one that actually registered is displayed and reported as `abortChord=`), and the
+  host's cancellation (`exec.signal` → `%LOCALAPPDATA%/wpm/takeover-abort.<pid>` latch file, because
+  the worker is single-threaded and cannot read a request mid-action). Interruption returns
+  `takeover_aborted` WITH `cursorRestored` and `injectedChars`.
+- **Keyboard injection, takeover-only** (`keyInput:"inject"`). `SendInput` + `KEYEVENTF_UNICODE`,
+  per character, interruptible every 8 characters or 50 ms. The foreground is asserted to BE the
+  target before sending and re-asserted at send time — measured: text sent while another window was
+  in front landed in that window. Success reports `effect=reported-by-send`, never "verified".
+  No hardware scancode is carried; a scancode-only target would ignore it (documented limitation).
+- **New refusals, three copies kept in step:** `takeover_unavailable` and `keyinject_unavailable`
+  (decision layer), `takeover_aborted` (runtime layer).
+- **New settings:** `takeoverAllowed=false`, `keyInjectAllowed=false`, `takeoverMaxMs=10000`,
+  `takeoverArmMs=800`. Both gates default OFF so an upgrade cannot start moving the cursor by itself.
+- **New gates:** `check-no-cursor-control.mjs` became a whitelist (`SetCursorPos` only in
+  `takeover.ps1`, `SendInput` only in `input-inject.ps1`, mouse events banned everywhere), and a new
+  `check-takeover-path.mjs` asserts G1–G5 (file confinement, branch-scoped loading,
+  HUD-checked-before-act, move-and-restore in one `try/finally`, keyboard-only events) and proves
+  itself non-vacuous by injecting one violation per assertion. `check.mjs` now runs 11 gates.
+- **`proof` grew a declared takeover:** cursor motion on this tier is reported as `declared`, but
+  `cursorRestored=false` is a hard `proof=fail` with the reason 「借了未还」.
+
+### Withdrawn — the terminal claim was measured false
+
+The plan for this release was to drive a terminal by typing into it. Two probes disagree, on this
+host, with everything else held correct: `scripts/probe-console-inject.ps1` sent 242 Unicode events
+into a dedicated Windows Terminal window (foreground verified, Enter sent) and the shell executed
+nothing; `scripts/probe-console-scan.ps1` repeated it with layout scan codes (262 events) and got the
+same result. GUI targets are unaffected — the same code types Chinese text into a WinForms edit
+successfully. So `terminal_no_door` stays, its reason now points at what DOES work (a target with a
+real door), and the documentation says plainly that the terminal is neither writable nor readable
+here. A capability that cannot be demonstrated is not shipped as a promise.
+
+### Fixed / hardened
+
+- **The marker had a white square behind it.** `overlay.ps1` set `AllowsTransparency` but never set
+  `Background`, and a WPF `Window`'s default background is `SystemColors.WindowBrush` (white) — so the
+  22px marker painted an opaque white tile with the blue ring inside it. Geometry could not see this
+  (the rect was correct and click-through still worked), which is why it survived every existing arm.
+  Fixed with an explicit `Transparent` background and pinned by a NEW PIXEL ARM in
+  `test/overlay-test.ps1`: `PrintWindow(PW_RENDERFULLCONTENT)` the marker and assert the corners are
+  unpainted while the centre still carries the ring. Measured before/after with the same probe — corner
+  rgb **217,217,217 → 0,0,0**, centre rgb **166,204,217 → 0,38,51**; removing the fix turns the arm red.
+- `lib/config.js`: on the Schemastery path, unknown setting keys were silently carried into the
+  validated value (a typo looked accepted while doing nothing). They are now rejected, matching the
+  shim's rule that the plugin test already pinned.
+- `docs/refusals.md`: `terminal_no_door` no longer claims "no child HWND" — the measured truth is
+  "three child HWNDs, none writable" (drag bar, DirectComposition target, 0×0 input sink).
+
+### Measured for this release (re-runnable from `scripts/`)
+
+- `SetCursorPos(+40,+20)` read back exactly, restore landed exactly (`probe-setcursor-pos.ps1`).
+  The elevated-foreground arm could not be arranged from a non-elevated process — recorded as
+  unmeasured, not guessed.
+- Injected text goes to the FOREGROUND window, not the intended one (`probe-sendinput-unicode.ps1`, B
+  in front ⇒ text in B and nothing in A; A in front with Chinese ⇒ landed in A).
+- HUD click-through: `HwndSource` hook receives `WM_NCHITTEST` but cannot change hit-testing; a
+  `WNDPROC` subclass works (`probe-hittest-children.ps1`).
+- Desktop test arms (manual, because they move the real pointer): `test/hud-test.ps1` 19/19,
+  `test/takeover-test.ps1` 22/22, `test/keyinject-test.ps1` 11/11 with one skip (the real-console
+  arm, superseded by the two console probes above).
 ## 0.1.6 — 2026-11-21
 
 Two failures that shared one refusal code are split — because the reader's next step differs.

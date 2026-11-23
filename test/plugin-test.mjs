@@ -44,7 +44,12 @@ ok('plugin declares inject for tools', Array.isArray(mod.inject) && mod.inject.i
 // ---- the three activation contracts Cordis enforces --------------------------------------------
 // Both of the failures below were found by booting a real profile after this file was already green,
 // which is why they are now assertions here: a unit test cannot see the loader's requirements.
-ok('Config is a schema VALUE, not a factory', typeof mod.Config === 'object' && mod.Config !== null,
+// WHAT MUST BE EXCLUDED IS AN ASYNC FACTORY, not a callable schema: a Schemastery schema IS a function
+// (callable instance) that also carries '~standard', and the host renders the settings form from it. The
+// original `typeof === 'object'` was written when only the shim path was reachable, so it asserted the
+// shim's shape rather than the contract Cordis actually needs. The contract is the next assertion.
+ok('Config is a schema VALUE, not a factory',
+  (typeof mod.Config === 'object' || typeof mod.Config === 'function') && mod.Config !== null,
   `typeof=${typeof mod.Config} -- Cordis calls Config['~standard'].validate`);
 ok("Config implements standard-schema ('~standard'.validate)",
   typeof mod.Config?.['~standard']?.validate === 'function');
@@ -191,6 +196,79 @@ mod.apply(offCtx, { enabled: false });
 const offTool = offCtx.registered[0];
 const offResult = await offTool.execute({ action: 'status' });
 ok('disabled plugin refuses before reaching the engine', offResult.ok === false && offResult.refusal === 'paused', JSON.stringify(offResult).slice(0, 160));
+
+// ---- R3 GATES: refused BEFORE the worker, and stripped rather than forwarded -----------------
+// "The gate is checked" is indistinguishable from "the gate is checked after the expensive part" unless
+// the worker traffic is counted, so the client's request method is wrapped for these arms only.
+{
+  const { WorkerClient } = await import('../lib/engine.js');
+  const original = WorkerClient.prototype.request;
+  const seen = [];
+  WorkerClient.prototype.request = function patched(payload) {
+    seen.push(payload);
+    return original.call(this, payload);
+  };
+  try {
+    const gated = makeCtx();
+    mod.apply(gated, {});
+    const gatedTool = gated.registered[0];
+
+    const noTakeover = await gatedTool.execute({ action: 'click', hwnd: '1', x: 10, y: 10, takeover: true });
+    ok('takeover with takeoverAllowed off is refused', noTakeover.ok === false && noTakeover.refusal === 'takeover_unavailable',
+      JSON.stringify(noTakeover).slice(0, 200));
+    ok('  ... and the refusal never reached the worker', seen.length === 0, JSON.stringify(seen));
+
+    // With BOTH gates off the takeover gate is the one that speaks first: the caller asked for a tier that
+    // is switched off, and naming that is more useful than describing a keyboard it never reached.
+    const noInject = await gatedTool.execute({ action: 'type', hwnd: '1', text: 'x', takeover: true, keyInput: 'inject' });
+    ok('injection inside a switched-off takeover tier is refused at the takeover gate',
+      noInject.ok === false && noInject.refusal === 'takeover_unavailable',
+      JSON.stringify(noInject).slice(0, 200));
+    ok('  ... and that refusal never reached the worker either', seen.length === 0, JSON.stringify(seen));
+
+    // The K5 independence arm: injection open, takeover closed. Injection must stay impossible, because
+    // SendInput writes to the foreground and the takeover tier is what makes that a declared action.
+    const openInject = makeCtx();
+    mod.apply(openInject, { keyInjectAllowed: true });
+    const openTool = openInject.registered[0];
+    const injectNoTakeover = await openTool.execute({ action: 'type', hwnd: '1', text: 'x', keyInput: 'inject' });
+    ok('keyInjectAllowed alone does not enable injection (it needs the takeover tier)',
+      injectNoTakeover.ok === false && injectNoTakeover.refusal === 'keyinject_unavailable',
+      JSON.stringify(injectNoTakeover).slice(0, 200));
+    ok('  ... with zero worker traffic', seen.length === 0, JSON.stringify(seen));
+
+    // The other direction: takeover open, injection closed. Same code, and still no request.
+    const noKeyGate = makeCtx();
+    mod.apply(noKeyGate, { takeoverAllowed: true, keyInjectAllowed: false });
+    const noKeyTool = noKeyGate.registered[0];
+    const injectDenied = await noKeyTool.execute({ action: 'click', hwnd: '1', x: 10, y: 10, takeover: true, keyInput: 'inject' });
+    ok('an unauthorised keyInput is refused even when takeover is allowed',
+      injectDenied.ok === false && injectDenied.refusal === 'keyinject_unavailable',
+      JSON.stringify(injectDenied).slice(0, 200));
+    ok('  ... and it costs no worker request', seen.length === 0, JSON.stringify(seen));
+
+    // An AUTHORISED request is forwarded, with the per-call ceiling, and carries no keyInput at all when
+    // the caller did not ask for injection.
+    const allowed = makeCtx();
+    mod.apply(allowed, { takeoverAllowed: true });
+    const allowedTool = allowed.registered[0];
+    await allowedTool.execute({ action: 'click', hwnd: '1', x: 10, y: 10, takeover: true });
+    const forwarded = seen.find((p) => p.action === 'click');
+    ok('an authorised takeover reaches the worker with takeover:true', !!forwarded && forwarded.takeover === true,
+      JSON.stringify(forwarded));
+    ok('  ... with a numeric per-call ceiling', !!forwarded && typeof forwarded.takeoverMaxMs === 'number',
+      JSON.stringify(forwarded));
+    ok('  ... and no keyInput field when none was asked for', !!forwarded && !('keyInput' in forwarded),
+      JSON.stringify(forwarded));
+
+    await gated.dispose();
+    await openInject.dispose();
+    await noKeyGate.dispose();
+    await allowed.dispose();
+  } finally {
+    WorkerClient.prototype.request = original;
+  }
+}
 
 // ---- the worker lifetime is owned -----------------------------------------------------------
 await ctx.dispose();

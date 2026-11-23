@@ -28,10 +28,12 @@
     "The `refusalCases` array is executable: test/refusals-test.ps1 iterates it and binds the placeholders, so a documented refusal path cannot rot into fiction."
   ],
   "stance": {
-    "inputQueue": "no OS input-queue writes: no SendInput, no keybd_event, no mouse_event",
-    "focus": "no forged Alt key, no synthetic activation code",
-    "cursor": "the cursor is never moved: 0 px across 24 measured rounds (scripts/channel-raise-matrix.ps1)",
-    "tiers": "quiet (window messages) preferred over bounded-flash (UIA patterns); the flash tier must reverse itself once, and never pulls focus from a window the owner chose"
+    "inputQueue": "quiet and bounded-flash tiers write nothing to the OS input queue. The takeover tier (opt-in, takeoverAllowed) may send KEYBOARD input (SendInput + KEYEVENTF_UNICODE) only when keyInput='inject' was requested; mouse injection is structurally impossible (MOUSEEVENTF_* is banned repo-wide and the gate enforces it)",
+    "focus": "no forged Alt key, no synthetic activation code. The bounded-flash tier reverses its one flash; the takeover tier holds the focus until the action ends and then restores it through the same table",
+    "cursor": "the cursor is 0 px in the quiet and bounded-flash tiers (24 measured rounds, scripts/channel-raise-matrix.ps1). The takeover tier moves it to the action point BY REQUEST and always restores it; a restore that fails is reported as cursorRestored=false and turns proof=fail",
+    "keyboard": "keyboard injection exists only inside the takeover tier, only for targets with no message door and no UIA pattern (terminals, measured), only after asserting GetForegroundWindow() is the target. It does not carry hardware scancodes (KEYEVENTF_UNICODE), so a target that reads scancodes only will ignore it -- documented, not a bug",
+    "tiers": "quiet (window messages) preferred over bounded-flash (UIA patterns) preferred over takeover (explicit request, HUD mandatory, always restored); the flash tier must reverse itself once and never pulls focus from a window the owner chose",
+    "hud": "the takeover tier cannot run without the HUD: it is a hard precondition (refuse takeover_unavailable), not a decoration. Three phases (arming/active/done), no-activate, click-through outside its button, and three independent interruption paths"
   },
   "refusals": [
     { "code": "no_hwnd", "layer": "decision", "summary": "no usable target window handle" },
@@ -40,10 +42,13 @@
     { "code": "unreachable", "layer": "decision", "summary": "no message door and no usable UIA pattern; the tree is alive but offers nothing at the named point or element" },
     { "code": "uia_tree_empty", "layer": "decision", "summary": "the accessibility tree holds no content element at all; in every measured instance the cause is the application having UI Automation disabled, which only a launch-time switch changes" },
     { "code": "uia_probe_failed", "layer": "decision", "summary": "the accessibility probe threw before it could measure this target; the exception text rides the reason" },
-    { "code": "terminal_no_door", "layer": "decision", "summary": "terminal text surface exposes neither a child window nor a document element" },
+    { "code": "terminal_no_door", "layer": "decision", "summary": "terminal text surface has child windows but none of them is writable, and keyboard injection into this host's terminal was measured not to work (findings G3: Unicode and scan-code arms both accepted by SendInput, neither executed). Pick a target with a real door" },
     { "code": "needs_facts", "layer": "decision", "summary": "the caller supplied no measured facts for this target" },
+    { "code": "takeover_unavailable", "layer": "decision", "summary": "takeover was requested but cannot run safely: the takeoverAllowed gate is off or the HUD is not up. The request is refused rather than silently downgraded" },
+    { "code": "keyinject_unavailable", "layer": "decision", "summary": "keyboard injection was requested outside the takeover tier, with the keyInjectAllowed gate off, or with the target not in the foreground (SendInput writes to the foreground, so a blind injection would type into another application)" },
     { "code": "action_failed", "layer": "runtime", "summary": "the chosen channel threw while acting", "uncoveredReason": "needs a target whose channel reliably throws; not constructed this round (docs/refusals.md, gap 2)" },
-    { "code": "restore_failed", "layer": "runtime", "summary": "the OS refused to return the foreground after a flash", "uncoveredReason": "needs a real elevated window; task_52 (docs/refusals.md, gap 2)" }
+    { "code": "restore_failed", "layer": "runtime", "summary": "the OS refused to return the foreground after a flash", "uncoveredReason": "needs a real elevated window; task_52 (docs/refusals.md, gap 2)" },
+    { "code": "takeover_aborted", "layer": "runtime", "summary": "the owner or the host interrupted a takeover (HUD button, abort chord, host cancellation). Not a fault: the result still carries cursorRestored and injectedChars so the reader knows exactly how far it got", "uncoveredReason": "fires from a real interruption inside a live takeover action; test/takeover-test.ps1 covers the three interruption paths at the engine level (volatile flag, latch file, and the send-time abort probe), and the schema case is declared uncovered because the refusal vocabulary gate needs an executable decision-mode instance and this is a runtime outcome" }
   ],
   "tools": [
     {
@@ -71,12 +76,14 @@
           "hwnd": { "type": "string", "description": "Target top-level window handle, as returned by wpm_windows." },
           "x": { "type": "integer", "description": "Screen X coordinate. Must resolve to a child window of the target, otherwise the action is refused instead of being sent somewhere else." },
           "y": { "type": "integer", "description": "Screen Y coordinate." },
-          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." }
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." },
+          "takeover": { "type": "boolean", "default": false, "description": "Take the takeover tier: the real cursor moves to the action point and is always restored, the focus is held until the action ends, and a three-phase HUD is mandatory. Requires the takeoverAllowed setting or the call is refused with takeover_unavailable." },
+          "takeoverMaxMs": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 10000, "description": "Takeover only: how long the action may hold the cursor/focus." }
         },
         "required": ["hwnd", "x", "y"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted"]
     },
     {
       "name": "wpm_type",
@@ -90,12 +97,15 @@
           "text": { "type": "string", "description": "Text to write. Empty string is refused: it cannot be distinguished from a channel that silently did nothing." },
           "elementName": { "type": "string", "description": "Optional UIA Name or AutomationId of the control to write into. Naming an element forces the UIA tier, because a message tier cannot address 'the control called X'." },
           "replace": { "type": "boolean", "default": false, "description": "Replace the existing value instead of appending to it." },
-          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." }
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." },
+          "takeover": { "type": "boolean", "default": false, "description": "Take the takeover tier: the HUD is shown, the focus is held until the action ends, and (with keyInput) text may be typed into the foreground target." },
+          "takeoverMaxMs": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 10000, "description": "Takeover only: how long the action may hold the cursor/focus." },
+          "keyInput": { "type": "string", "enum": ["none", "inject"], "default": "none", "description": "Takeover only: 'inject' types the text with synthetic keyboard input into the foreground target, for windows with no message door and no UIA pattern (terminals). Requires keyInjectAllowed and the target in the foreground; otherwise the call is refused with keyinject_unavailable. The cursor is never moved by this path." }
         },
         "required": ["hwnd", "text"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted"]
     },
     {
       "name": "wpm_focus",
@@ -107,12 +117,14 @@
         "properties": {
           "hwnd": { "type": "string", "description": "Target top-level window handle." },
           "elementName": { "type": "string", "description": "UIA Name or AutomationId of the control that should hold focus." },
-          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." }
+          "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." },
+          "takeover": { "type": "boolean", "default": false, "description": "Take the takeover tier: the HUD is shown and the focus is held until the action ends, then restored. Requires the takeoverAllowed setting." },
+          "takeoverMaxMs": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 10000, "description": "Takeover only: how long the action may hold the cursor/focus." }
         },
         "required": ["hwnd", "elementName"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "takeover_aborted"]
     },
     {
       "name": "wpm_status",
@@ -177,7 +189,7 @@
       "tool": "wpm_type",
       "facts": { "hwnd": "$liveHwnd", "family": "terminal" },
       "expect": "terminal_no_door",
-      "note": "Decision-table instance only. A real terminal window is not launched in this run because findings.md:311-316 records a leftover-dialog accident on this host; the real evidence is the coverage census."
+      "note": "Decision-table instance, and now a conclusion verified by measurement rather than by caution: the takeover + keyInput path was measured NOT to drive this host's terminal (scripts/probe-console-inject.ps1: 242 Unicode events with the terminal in the foreground and Enter sent, nothing executed; scripts/probe-console-scan.ps1: same with layout scan codes). The code stays because its next step is still actionable -- use a target with a door."
     },
     {
       "id": "click-uia-tree-empty",
@@ -202,6 +214,38 @@
       "facts": null,
       "expect": "needs_facts",
       "note": "The absence of facts must refuse, not default to the quiet branch. Unreachable through the engine (facts are always measured), so this one guards the table when it is used on its own."
+    },
+    {
+      "id": "takeover-unavailable",
+      "mode": "decision",
+      "tool": "wpm_click",
+      "facts": { "hwnd": "$liveHwnd", "takeoverRequested": true, "hudReady": false },
+      "expect": "takeover_unavailable",
+      "note": "Takeover was asked for but the HUD is not up. The HUD is a hard precondition, so the request is refused instead of being served silently by the quiet tier -- the point of the code is that the caller learns the request did not happen."
+    },
+    {
+      "id": "keyinject-unavailable",
+      "mode": "decision",
+      "tool": "wpm_type",
+      "facts": { "hwnd": "$liveHwnd", "takeoverRequested": true, "hudReady": true, "keyInjectRequested": true, "keyInjectAllowed": false },
+      "expect": "keyinject_unavailable",
+      "note": "Injection requested with the keyInjectAllowed gate off. Measured fact behind the refusal: SendInput writes to the FOREGROUND window (scripts/probe-sendinput-unicode.ps1 arm B: text landed in the foreground window and not in the window the caller had in mind), so an unauthorised injection is refused rather than attempted."
+    },
+    {
+      "id": "keyinject-not-foreground",
+      "mode": "decision",
+      "tool": "wpm_type",
+      "facts": { "hwnd": "$liveHwnd", "takeoverRequested": true, "hudReady": true, "keyInjectRequested": true, "keyInjectAllowed": true, "foregroundIsTarget": false },
+      "expect": "keyinject_unavailable",
+      "note": "Injection requested, gate open, but the target is not the foreground window and could not be raised. The engine refuses: blind injection would type into whatever the owner was using (same measured fact as keyinject-unavailable)."
+    },
+    {
+      "id": "takeover-aborted",
+      "mode": "none",
+      "tool": "wpm_click",
+      "args": { "hwnd": "$liveHwnd", "x": 100, "y": 100 },
+      "expect": "takeover_aborted",
+      "note": "NOT covered by an executable schema case: it is a RUNTIME outcome of an interruption (HUD button / abort chord / host cancellation), and constructing one needs a live takeover in progress. test/takeover-test.ps1 covers the three interruption paths at the engine level; the reason is declared in tools.json refusals."
     },
     {
       "id": "action-failed",

@@ -1,4 +1,4 @@
-﻿# overlay-test.ps1 -- measure the task_54 promises, not eyeball them.
+# overlay-test.ps1 -- measure the task_54 promises, not eyeball them.
 #
 # THE PROMISES, each one a syscall answer rather than a screenshot:
 #   1. the trio is ON the window (ex-style read-back: TOPMOST|NOACTIVATE|TRANSPARENT)
@@ -19,6 +19,18 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 . (Join-Path $PSScriptRoot '..\src\engine\engine.ps1')
 . (Join-Path $PSScriptRoot '..\src\engine\overlay.ps1')
+
+# PW_RENDERFULLCONTENT (2): a layered window does not paint through a plain WM_PRINT, so the pixel arm
+# below would read an empty bitmap and pass vacuously without this flag.
+if (-not ('WpmWinPrint' -as [type])) {
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class WpmWinPrint {
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
+}
+'@
+}
 
 function Find-WpmWindow([string]$titlePart) {
   # NO GetNewClosure here, deliberately: measured in .tmp/ovdbg2.ps1, a closure snapshot rebinds
@@ -83,6 +95,40 @@ if ($fgBefore -eq $fgAfter) {
   "  SKIP  Show() did not take the foreground: foreground changed while real input was $ageAfter ms old -- cannot attribute it to Show()"
 } else {
   Assert-Ov 'Show() did not take the foreground' $false "before=$fgBefore after=$fgAfter lastInputAgeMs=$ageAfter"
+}
+
+# 2b: THE MARKER'S SURFACE, IN PIXELS. Geometry cannot see this defect: a WPF Window's default background
+# is SystemColors.WindowBrush (white), so with no explicit Background the 22px marker painted an OPAQUE
+# WHITE TILE with the blue ring inside it -- the rect was correct, the click-through still worked, and the
+# product looked wrong. Measured before/after the fix with the same probe: corner rgb 217,217,217 (white
+# at Opacity 0.85 over black) versus 0,0,0 (nothing painted), while the centre kept the ring.
+# The assertion is therefore about PAINT, not about a style flag: a transparent corner is one whose
+# channels are all near zero, and a drawn ring is a centre that is clearly not the corner colour.
+[void](Set-WpmOverlayMarker -X 700 -Y 500)
+Start-Sleep -Milliseconds 350
+$mkRect = New-Object 'WpmWin+RECT'
+$mkHwnd = [IntPtr][int64][WpmCtl]::OverlayHwnd
+if ($mkHwnd -ne [IntPtr]::Zero -and [WpmWin]::GetWindowRect($mkHwnd, [ref]$mkRect)) {
+  Add-Type -AssemblyName System.Drawing
+  $mw = $mkRect.Right - $mkRect.Left; $mh = $mkRect.Bottom - $mkRect.Top
+  $bmp = New-Object System.Drawing.Bitmap($mw, $mh)
+  $mg = [System.Drawing.Graphics]::FromImage($bmp)
+  $mhdc = $mg.GetHdc()
+  $printed = $false
+  try { $printed = [bool][WpmWinPrint]::PrintWindow($mkHwnd, $mhdc, 2) } catch { }
+  $mg.ReleaseHdc($mhdc); $mg.Dispose()
+  $corner = $bmp.GetPixel(1, 1)
+  $mid = $bmp.GetPixel([int]($mw / 2), [int]($mh / 2))
+  $bmp.Dispose()
+  $cornerSum = [int]$corner.R + [int]$corner.G + [int]$corner.B
+  $midSum = [int]$mid.R + [int]$mid.G + [int]$mid.B
+  # (No backslash continuation: PowerShell joins lines with a backtick, so a trailing "" became the
+  # detail argument and the message was silently dropped. Written on one line instead of "fixed prettily".)
+  Assert-Ov 'marker surface: the corners are unpainted (no white background tile)' ($cornerSum -lt 30) ("corner rgb={0},{1},{2} printWindow={3}" -f $corner.R, $corner.G, $corner.B, $printed)
+  Assert-Ov 'marker surface: the ring is still painted at the centre' ($midSum -gt 30) ("center rgb={0},{1},{2}" -f $mid.R, $mid.G, $mid.B)
+} else {
+  $skip++
+  "  SKIP  marker surface: could not read the marker window rect"
 }
 
 # 3: click-through. Park the marker over the base window's centre and hit-test that point.

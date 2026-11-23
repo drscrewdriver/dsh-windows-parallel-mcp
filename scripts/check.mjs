@@ -101,6 +101,17 @@ pass = run('no cursor-control primitive in the shipped engine', () => {
   return { ok: r.status === 0, out: out.split('\n')[0] || '(no output)' };
 }) && pass;
 
+// THE TAKEOVER TIER'S STRUCTURE (R3). The cursor move and the keyboard injection are new capabilities;
+// what makes them safe is not the calls but the ORDER and the enclosure around them: the HUD must exist
+// first (G3), the primitives live in one file each (G1/G2), and the cursor move sits inside the
+// try/finally that restores it (G4). Run in --self-test mode on purpose: this gate mutates a copy of the
+// engine for each assertion and requires the corresponding red, because a gate that has never been red is
+// a comment. Cheap (~10ms) and desktop-free.
+pass = run('takeover path structure (G1-G5, self-tested)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-takeover-path.mjs', '--self-test'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 // The package that gets installed is the product. A missing engine file or a swept-in .tmp/ both
 // install cleanly and fail later, so the tarball is checked here rather than discovered at install.
 pass = run('package tarball contents', () => {
@@ -114,7 +125,10 @@ pass = run('package tarball contents', () => {
 pass = run('host half + sidecar (process)', () => {
   const out = [];
   let good = true;
-  for (const file of ['test/plugin-test.mjs', 'test/worker-smoke.mjs']) {
+  // signal-test included: a shim that drops the call context (`exec`) silently disables host cancellation,
+  // and that failure is invisible to every other arm here. It creates its own target window and types
+  // through the message door, so it does not depend on what is on screen.
+  for (const file of ['test/plugin-test.mjs', 'test/worker-smoke.mjs', 'test/signal-test.mjs']) {
     const r = spawnSync(process.execPath, [file], { encoding: 'utf8' });
     if (r.status !== 0) good = false;
     const tail = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(-1)[0] || '';

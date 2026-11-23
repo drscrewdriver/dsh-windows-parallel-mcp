@@ -1,4 +1,4 @@
-# win.ps1 -- the IO half of the R2' engine: probe a target's doors, act through the cheapest
+﻿# win.ps1 -- the IO half of the R2' engine: probe a target's doors, act through the cheapest
 # door it has, and put the owner's focus back when the action cost them a flash.
 #
 # Layering is deliberate. decide.ps1 owns every judgement (pure, unit-tested). This file owns
@@ -379,6 +379,23 @@ public static class WpmCtl {
     public static object Dispatcher = null;   // overlay thread's WPF dispatcher (set by that thread)
     public static object Window = null;        // the marker window (touched ONLY on its own thread)
     public static object Timer = null;         // auto-hide timer (same rule)
+
+    // ---- R3 takeover surface (spec.md §2) ------------------------------------------------------
+    // Same rule as the marker fields: the HUD thread owns the window and reads these; the engine writes
+    // the request fields. No scriptblock is ever marshalled across the threads.
+    public static volatile bool HudOn = false;
+    public static volatile bool TakeoverAbort = false;   // HUD button / abort chord / worker abort
+    public static volatile bool AbortChordOk = false;
+    // volatile is ILLEGAL on string in C# (like long below): a reference write is atomic, so a plain
+    // static is the honest declaration and not a weaker one.
+    public static string HudPhase = "";
+    public static string HudAction = "";
+    public static string AbortChordLabel = "";
+    public static volatile int HudElapsedMs = 0;
+    public static volatile int HudMaxMs = 0;
+    public static volatile int HudSeq = 0;
+    public static volatile int InjectedChars = 0;
+    public static long HudHwnd = 0;
 }
 '@
 }

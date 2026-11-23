@@ -225,6 +225,38 @@ const mk = (n, over) => Array.from({ length: n }, (_, i) => ({
     && /未独立验证/.test(pat.reason), JSON.stringify(pat.dimensions));
 }
 
+// 14. THE TAKEOVER TIER (R3): the tier that moves the pointer ON REQUEST, and the one red line it must
+//     never cross. Both halves matter -- a declared move must not be a false red, and a move that was not
+//     returned must not be excused by "the desktop was still".
+{
+  // Sustained motion across several gaps with no physical input: exactly what the takeover tier does when
+  // it places the pointer on the action point.
+  const moved = mk(20).map((s, i) => (i >= 6 && i <= 16 ? { ...s, cx: 500 + (i - 6) * 30 } : s));
+
+  const undeclared = evaluateProof(moved, { effect: 'reported-by-send' });
+  ok('the same motion WITHOUT a takeover declaration stays inconclusive at best',
+    undeclared.verdict === 'inconclusive', JSON.stringify({ v: undeclared.verdict, dims: undeclared.dimensions }));
+
+  const declared = evaluateProof(moved, { declaredTakeover: true, cursorRestored: true, effect: 'reported-by-send' });
+  ok('takeover: declared cursor motion is not a failure', declared.verdict !== 'fail',
+    JSON.stringify({ v: declared.verdict, dims: declared.dimensions }));
+  ok('  the cursor dimension reads "declared"', declared.dimensions.cursor === 'declared',
+    JSON.stringify(declared.dimensions));
+  ok('  the reason names the restore as the promise that still applies', /restore|cursorRestored/i.test(declared.reason),
+    declared.reason);
+
+  const notRestored = evaluateProof(moved, { declaredTakeover: true, cursorRestored: false, effect: 'reported-by-send' });
+  ok('cursorRestored=false => FAIL regardless of how still the desktop was', notRestored.verdict === 'fail',
+    JSON.stringify({ v: notRestored.verdict, dims: notRestored.dimensions }));
+  ok('  the reason says 借了未还 in so many words', /借了未还/.test(notRestored.reason), notRestored.reason);
+  ok('  the cursor dimension is forced to fail', notRestored.dimensions.cursor === 'fail',
+    JSON.stringify(notRestored.dimensions));
+
+  const clean = evaluateProof(mk(20), { declaredTakeover: true, cursorRestored: true, effect: 'reported-by-send' });
+  ok('takeover with a still window and a good restore => pass', clean.verdict === 'pass',
+    JSON.stringify({ v: clean.verdict, dims: clean.dimensions }));
+}
+
 console.log('');
 console.log(`proof-window: ${pass} passed, ${failures.length} failed`);
 process.exit(failures.length ? 1 : 0);

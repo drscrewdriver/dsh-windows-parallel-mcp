@@ -1,11 +1,11 @@
 {
   "name": "dsh-windows-parallel-mcp",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "publishConfig": {
     "access": "public",
     "tag": "latest"
   },
-  "description": "Drive a Windows window without moving the cursor or stealing the keyboard: one tool, five actions, a channel decision table that prefers the quiet door, and a bounded self-reversing focus flash when only UI Automation can reach the control. Windows PowerShell 5.1 sidecar, zero install dependencies, no synthetic input.",
+  "description": "Drive a Windows window quietly by default and visibly on request: one tool, five actions, a channel decision table that prefers the quiet door, a bounded self-reversing focus flash when only UI Automation can reach the control, and an opt-in takeover tier (HUD mandatory, cursor always restored, keyboard injection only when asked and only for the foreground target). Windows PowerShell 5.1 sidecar, zero install dependencies, no mouse injection.",
   "keywords": [
     "deepseek",
     "deepseek-harness",
@@ -40,6 +40,7 @@
     "src/engine/",
     "src/schema/",
     "docs/refusals.md",
+    "docs/takeover.md",
     "CHANGELOG.md",
     "cordis.patch.yml",
     "dsh.plugin.json",
@@ -68,6 +69,10 @@
     "test": "node scripts/check.mjs && node test/plugin-test.mjs && node test/worker-smoke.mjs",
     "test:decide": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/decide-test.ps1",
     "test:refusals": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/refusals-test.ps1",
+    "test:hud": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File test/hud-test.ps1",
+    "test:takeover": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File test/takeover-test.ps1",
+    "test:keyinject": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File test/keyinject-test.ps1",
+    "smoke:installed": "node test/smoke-installed.mjs",
     "prepack": "node scripts/check-pack.mjs",
     "verify:install": "node scripts/verify-install.mjs"
   }
