@@ -8,7 +8,7 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.3.0 — registry time 回填前
+## 0.3.0 — 2026-11-23
 
 > Десять языков и типизированный публичный интерфейс. Документация выходит на десяти языках экосистемы DSH, русский — равноправный переключатель рядом с английским. Два варианта установки: desktop (только встроенный pnpm, никогда `dsh plugin add`) и не-desktop. Добавлен `types/index.d.ts`. Подробнее — в английской записи.
 

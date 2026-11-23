@@ -5,10 +5,9 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.3.0 — pending publish
+## 0.3.0 — 2026-11-23
 
-> Registry `time` to be filled in after publish (this project dates versions by registry time, not
-> by commit date — see the header above). Do not ship this entry with a fabricated date.
+> Published 2026-11-23T09:21:29.737Z (registry `time` for 0.3.0, read from the packument, not from a commit date).
 
 **Ten languages, and a typed public surface.** 0.2.0 was the capability release; 0.3.0 is the
 reachability release. The documentation now ships in the ten DSH ecosystem languages

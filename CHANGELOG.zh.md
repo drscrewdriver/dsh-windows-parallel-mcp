@@ -8,7 +8,7 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.3.0 — registry time 回填前
+## 0.3.0 — 2026-11-23
 
 > 十种语言与类型化公开接口。文档现以 DSH 生态十语发布，中文为与英文并列的一等切换；安装明确为 desktop / 非desktop 两类（desktop 只能用内置 pnpm 手动补，禁 dsh plugin add）；新增 types/index.d.ts 类型契约。详情见英文权威条目。
 
