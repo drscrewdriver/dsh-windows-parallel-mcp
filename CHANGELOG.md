@@ -7,9 +7,7 @@ one is a promise to anyone installing it.
 
 ## 0.5.0 — 2026-11-23
 
-> Working date (2026-11-23), not a registry time: at the time this file was written `package.json`
-> was already 0.5.0 and the tarball was built, but publishing needs the owner's sign-off. The
-> registry `time` for 0.5.0 replaces this line when it ships.
+> Published 2026-11-23T14:19:37.293Z (registry `time` for 0.5.0, read from the packument, not from a commit date).
 
 **The frame becomes something the caller can read, and the coordinate arithmetic leaves the model.**
 Three read actions, one new refusal code, and one planned invariant that measurement destroyed — kept
