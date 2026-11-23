@@ -10,6 +10,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.0 — 2026-11-23
 
+> Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).
+
 > 런타임 변경은 없습니다. 모든 작업은 "이 주석은 사실이다"를 기계가 검증할 수 있게 만드는 데 쓰였습니다. `lib/` 전체를 JSDoc + checkJs로 검사(107 오류 → 0), 수기 `types/index.d.ts`가 구현 측 단일 진실 원천이 되고(바꾸면 빨개짐), 코드 미변경은 AST 노드 단위 비교로 증명. 테스트 불안정 원인 2건(pre-layout oracle 경합, 대상 창 가림)도 수정. 새 의존성 없음. 자세한 내용은 영문 항목 참조.
 
 ## 0.3.0 — 2026-11-23

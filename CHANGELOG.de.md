@@ -10,6 +10,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.0 — 2026-11-23
 
+> Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).
+
 > Keine Laufzeitänderung: die ganze Arbeit macht die Aussage „dieser Kommentar ist wahr" maschinell überprüfbar. `lib/` vollständig mit JSDoc versehen und unter checkJs geprüft (107 Fehler → 0), die handgeschriebene `types/index.d.ts` wird zur einzigen Wahrheitsquelle auf Implementierungsseite (eine Änderung dort macht rot), und die Unverändertheit des Codes ist Knoten für Knoten belegt (identische ASTs). Zwei echte Instabilitätsursachen im Testaufbau behoben (Wettlauf um das Pre-Layout-Orakel, verdecktes Ziel-Fenster). Keine neue Abhängigkeit. Siehe englischen Eintrag.
 
 ## 0.3.0 — 2026-11-23

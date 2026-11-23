@@ -10,6 +10,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.0 — 2026-11-23
 
+> Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).
+
 > 実行時の変更はゼロ。作業のすべては「このコメントは正しい」を機械で検証可能にすることに使われました。`lib/` 全体を JSDoc + checkJs で検査（107 エラー → 0）、手書きの `types/index.d.ts` が実装側の唯一の真実源になり（変更すれば赤くなる）、コード未変更は AST のノード単位比較で証明。テスト側の不安定要因2件（pre-layout oracle 競合、対象ウィンドウの遮蔽）も修正。新しい依存はゼロ。詳細は英語版参照。
 
 ## 0.3.0 — 2026-11-23

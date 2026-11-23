@@ -10,6 +10,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.0 — 2026-11-23
 
+> Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).
+
 > Aucun changement d'exécution : tout le travail sert à rendre vérifiable par la machine l'affirmation « ce commentaire est vrai ». `lib/` entièrement annoté et contrôlé sous checkJs (107 erreurs → 0), le `types/index.d.ts` écrit à la main devient la source unique de vérité côté implémentation (le modifier le passe au rouge), et l'absence de changement de code est prouvée nœud par nœud (AST identiques). Deux causes réelles d'instabilité du banc de test corrigées (course sur l'oracle pré-layout, fenêtre cible masquée). Aucune nouvelle dépendance. Voir l'entrée anglaise.
 
 ## 0.3.0 — 2026-11-23

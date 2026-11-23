@@ -7,6 +7,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.0 — 2026-11-23
 
+> Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).
+
 **Nothing about the plugin changed; everything about proving it did.** 0.4.0 has no runtime change at
 all -- the seven files under `lib/` differ from 0.3.0 by comments and JSDoc only, and that is verified
 node by node against the previous revision (identical abstract syntax trees, 6739 nodes in `index.js`,
