@@ -28,6 +28,23 @@ function Ok([string]$name, [bool]$cond, [string]$detail = '') {
   else { $script:fail++; Write-Output ("  FAIL  " + $name + $(if ($detail) { ' :: ' + $detail } else { '' })) }
 }
 function Skip([string]$name, [string]$why) { $script:skips++; Write-Output ("  SKIP  " + $name + ' :: ' + $why) }
+# Age of the last PHYSICAL input, in ms (-1 when unreadable). The cursor is shared with the owner, so an
+# external read of "is the pointer back" can only be graded while nobody else is touching the mouse;
+# measured 2026-11-23 with a human at the desk: the same assertion drifted 11 / 213 / 649 px, i.e. the
+# FAIL was the instrument reading someone else's motion, not a failed restore. The engine's own
+# read-back (cursorAfterX/Y) is the interference-free half of the pair and stays a hard assertion.
+function LastInputAgeMs {
+  try { return [long][WpmWin]::LastInputAgeMs() } catch { return -1 }
+}
+# A drift assertion is only gradeable while the pointer was demonstrably ours between the two reads.
+function SkipIfOwnerMoved([string]$name, [long]$ElapsedMs, [long]$AgeAtAfter) {
+  if ($AgeAtAfter -lt 0) { Skip $name 'the last-input age could not be read, so external motion cannot be ruled out'; return $true }
+  if ($AgeAtAfter -lt ($ElapsedMs + 500)) {
+    Skip $name ('a physical input arrived within the measured window (age=' + $AgeAtAfter + 'ms, window=' + $ElapsedMs + 'ms); the drift may be the owner''s own motion, so it is not graded')
+    return $true
+  }
+  return $false
+}
 function CursorXY { $p = New-Object 'System.Drawing.Point'; $p = [System.Windows.Forms.Cursor]::Position; return @($p.X, $p.Y) }
 
 $form = New-Object System.Windows.Forms.Form
@@ -65,9 +82,12 @@ try {
   Ok 'I4: a plain click reports no takeover' ([string]$plain.takeover -ne 'true') ([string]$plain.takeover)
 
   # ---- I1/C2: a takeover click moves the pointer (by request) and puts it back -------------
-  $c2 = CursorXY
+  $c2 = CursorXY; $c2At = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $tk = Invoke-WpmAction -Hwnd $hwnd -Action click -X $clickX -Y $clickY -SettleMs 80 -Takeover -TakeoverArmMs 0 -HudDoneMs 0 -TakeoverMaxMs 5000
-  $c3 = CursorXY
+  $c3 = CursorXY; $c3At = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  # How long the external pair of reads spans: the drift assertion is graded only if no physical input
+  # landed inside it (see SkipIfOwnerMoved).
+  $c2ElapsedMs = $c3At - $c2At
   Ok 'I1: the takeover click succeeds' ([bool]$tk.ok) ([string]$tk.refusal + ' ' + [string]$tk.reason)
   Ok 'I1: the result declares the takeover tier' ([string]$tk.tier -eq 'takeover' -and [string]$tk.takeover -eq 'true') ([string]$tk.tier + '/' + [string]$tk.takeover)
   Ok 'I1: the cursor was actually moved (the move is visible, not a claim)' ([string]$tk.cursorMoved -eq 'true') ([string]$tk.cursorMoved + ' readBack=' + [string]$tk['cursorX'] + ',' + [string]$tk['cursorY'])
@@ -78,13 +98,15 @@ try {
   # apart (the C4 arm below). An exact external comparison would be a flake generator, not a stronger test.
   Ok 'C2: the engine restored to the point it saved (exact read-back)' ([int]$tk['cursorAfterX'] -eq [int]$tk['cursorBeforeX'] -and [int]$tk['cursorAfterY'] -eq [int]$tk['cursorBeforeY']) ([string]$tk['cursorBeforeX'] + ',' + [string]$tk['cursorBeforeY'] + ' -> ' + [string]$tk['cursorAfterX'] + ',' + [string]$tk['cursorAfterY'])
   $driftPx = [Math]::Max([Math]::Abs($c3[0] - $c2[0]), [Math]::Abs($c3[1] - $c2[1]))
-  Ok 'C2: the cursor is back at the pre-action point (within ambient drift <= 4px)' ($driftPx -le 4) ('before=' + ($c2 -join ',') + ' after=' + ($c3 -join ',') + ' drift=' + $driftPx)
+  if (-not (SkipIfOwnerMoved 'C2: the cursor is back at the pre-action point (within ambient drift <= 4px)' $c2ElapsedMs (LastInputAgeMs))) {
+    Ok 'C2: the cursor is back at the pre-action point (within ambient drift <= 4px)' ($driftPx -le 4) ('before=' + ($c2 -join ',') + ' after=' + ($c3 -join ',') + ' drift=' + $driftPx)
+  }
   Ok 'I1: the HUD window existed during the action' ([string]$tk['hudHwnd'] -ne '0' -and [string]$tk['hudHwnd'] -ne '') ([string]$tk['hudHwnd'])
   Ok 'I1: a takeover result names the abort chord it actually registered' ([string]::IsNullOrEmpty([string]$tk['abortChord']) -or [string]$tk['abortChord'] -match '^Ctrl\+') ([string]$tk['abortChord'])
   Ok 'C13: the action took at least the arming clock in measured time' ([int]$tk.takeoverMs -ge 0) ([string]$tk.takeoverMs)
 
   # ---- I3/C4: interruption during arming --------------------------------------------------
-  $c4 = CursorXY
+  $c4 = CursorXY; $c4At = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $latch = Get-WpmTakeoverLatchPath
   $job = Start-Job -ScriptBlock {
     param($p)
@@ -94,13 +116,16 @@ try {
     Set-Content -LiteralPath $p -Value 'abort' -Encoding ASCII
   } -ArgumentList $latch
   $ab = Invoke-WpmAction -Hwnd $hwnd -Action click -X $clickX -Y $clickY -SettleMs 80 -Takeover -TakeoverArmMs 2000 -HudDoneMs 0 -TakeoverMaxMs 5000
-  $c5 = CursorXY
+  $c5 = CursorXY; $c5At = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $c4ElapsedMs = $c5At - $c4At
   [void](Wait-Job $job -Timeout 5); Remove-Job $job -Force -ErrorAction SilentlyContinue
   Ok 'I3: the interrupted takeover reports takeover_aborted' ([string]$ab.refusal -eq 'takeover_aborted') ([string]$ab.refusal + ' ' + [string]$ab.reason)
   Ok 'C4/I3: the interrupted takeover reports cursorRestored=true' ([string]$ab.cursorRestored -eq 'true') ([string]$ab.cursorRestored)
   Ok 'C4: the interrupted takeover reports its own restore read-back as equal' ([int]$ab['cursorAfterX'] -eq [int]$ab['cursorBeforeX'] -and [int]$ab['cursorAfterY'] -eq [int]$ab['cursorBeforeY']) ([string]$ab['cursorBeforeX'] + ',' + [string]$ab['cursorBeforeY'] + ' -> ' + [string]$ab['cursorAfterX'] + ',' + [string]$ab['cursorAfterY'])
   $drift4 = [Math]::Max([Math]::Abs($c5[0] - $c4[0]), [Math]::Abs($c5[1] - $c4[1]))
-  Ok 'C4: the interrupted takeover left the cursor where it was (within ambient drift <= 4px)' ($drift4 -le 4) ('before=' + ($c4 -join ',') + ' after=' + ($c5 -join ',') + ' drift=' + $drift4)
+  if (-not (SkipIfOwnerMoved 'C4: the interrupted takeover left the cursor where it was (within ambient drift <= 4px)' $c4ElapsedMs (LastInputAgeMs))) {
+    Ok 'C4: the interrupted takeover left the cursor where it was (within ambient drift <= 4px)' ($drift4 -le 4) ('before=' + ($c4 -join ',') + ' after=' + ($c5 -join ',') + ' drift=' + $drift4)
+  }
   Ok 'I3: the interrupted takeover reports how many characters went out (zero for a click)' ([int]$ab.injectedChars -eq 0) ([string]$ab.injectedChars)
   Remove-Item -LiteralPath $latch -Force -ErrorAction SilentlyContinue
 

@@ -140,8 +140,13 @@ function Get-WpmProofWindow {
 
 function Invoke-WpmAction {
   param(
-    [Parameter(Mandatory)][string]$Hwnd,
-    [Parameter(Mandatory)][ValidateSet('click', 'type', 'focus', 'status')][string]$Action,
+    # NOT Mandatory any more: a full-screen screenshot (screenshot + fullScreen:true) legitimately has
+    # no target window, and PowerShell REFUSES to bind an empty string to a Mandatory [string]
+    # parameter -- which surfaced as "cannot bind argument to parameter 'Hwnd' because it is an empty
+    # string" instead of the capture the caller asked for. Every windowed action still checks liveness
+    # itself and returns no_hwnd, so nothing was made lenient except the binding.
+    [string]$Hwnd = '',
+    [Parameter(Mandatory)][ValidateSet('click', 'type', 'focus', 'status', 'snapshot', 'screenshot', 'preview')][string]$Action,
     [int]$X = -1,
     [int]$Y = -1,
     [string]$Text = '',
@@ -156,7 +161,24 @@ function Invoke-WpmAction {
     [int]$TakeoverMaxMs = 10000,
     [switch]$KeyInject,
     [int]$TakeoverArmMs = 800,
-    [int]$HudDoneMs = 1500
+    [int]$HudDoneMs = 1500,
+    # ---- 0.5.0 read paths and element addressing ------------------------------------------------
+    # `Space` is the coordinate space of X/Y for click. 'image' means the numbers came from a
+    # screenshot and the ENGINE converts them: the caller never multiplies a scale factor, which is
+    # the failure the upstream library documents against itself ("Click lands in the wrong place").
+    [ValidateSet('screen', 'image')][string]$Space = 'screen',
+    [string]$ShotId = '',
+    # A label is a reference into the LAST frame this worker printed. It is resolved back to the UIA
+    # element by RuntimeId, so a labelled action still takes the silent pattern path.
+    [int]$Label = 0,
+    [string]$SnapId = '',
+    [int]$MaxElements = 300,
+    [bool]$InteractableOnly = $true,
+    [string]$SinceSnapId = '',
+    [string]$Intent = '',
+    [bool]$FullScreen = $false,
+    [int]$MaxWidth = 0,
+    [int]$ShotsKeep = 10
   )
   $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $h = [IntPtr][int64]$Hwnd
@@ -189,6 +211,139 @@ function Invoke-WpmAction {
     $result.lastInputAgeMs = $st.lastInputAgeMs
     $result.paused = $st.paused
     $result.stance = $st.stance
+    # The DPI stance travels with status because the read paths (snapshot rects, screenshot pixels)
+    # are only in PHYSICAL pixels while this process is per-monitor DPI aware. A future deletion of the
+    # setter would otherwise turn the whole coordinate story half-scale with nothing to notice.
+    $result.dpiAware = [bool]$st.dpiAware
+    $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+    return $result
+  }
+
+  # ---- 0.5.0 READ PATHS: snapshot / screenshot / preview --------------------------------------
+  # A READ IS NOT AN ACTION. None of these three writes an input-queue entry, takes the focus, or
+  # produces a proof window -- there is no action to prove. They sit before the hwnd check because a
+  # full-screen capture has no target window at all; each branch performs its own liveness check, so a
+  # dead handle is still `no_hwnd` and a paused engine still says `paused` rather than serving reads.
+  if ($Action -eq 'snapshot' -or $Action -eq 'screenshot' -or $Action -eq 'preview') {
+    if ([WpmCtl]::Paused) {
+      $result.refusal = 'paused'; $result.reason = $script:WpmRefusals.paused
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    $needsWindow = -not ($Action -eq 'screenshot' -and $FullScreen)
+    if ($needsWindow -and (-not $h -or -not [WpmWin]::IsWindow($h))) {
+      $result.refusal = 'no_hwnd'; $result.reason = 'the hwnd does not identify a live window'
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    $result.channel = 'none'; $result.tier = 'none'
+    if ($Action -eq 'snapshot') {
+      try {
+        $snap = Get-WpmSnapshotTree -Hwnd $h -MaxElements $MaxElements -InteractableOnly $InteractableOnly `
+          -Intent $Intent -SinceSnapId $SinceSnapId
+      } catch {
+        $result.refusal = 'uia_probe_failed'
+        $result.reason = 'the accessibility probe threw while walking the tree: ' + $_.Exception.Message
+        $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+        return $result
+      }
+      $snapFrame = if ($snap.ContainsKey('frame')) { [string]$snap.frame } else { '' }
+      $snapCheck = if ($snap.ContainsKey('frameCheck')) { [string]$snap.frameCheck } else { '' }
+      if (-not $snap.ok) {
+        # THREE FAILURE WORLDS, three codes: a superseded id is stale_ref (re-read the frame); a frame
+        # self-check failure is a refusal to point at all (unreachable -- the coordinates cannot be
+        # trusted); anything else means the walk itself failed to measure (uia_probe_failed).
+        if ($snap.stale) { $result.refusal = 'stale_ref' }
+        elseif ($snapCheck -eq 'fail') { $result.refusal = 'unreachable' }
+        else { $result.refusal = 'uia_probe_failed' }
+        $result.reason = [string]$snap.reason
+        $result.frame = $snapFrame
+        $result.frameCheck = $snapCheck
+        $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+        return $result
+      }
+      $result.ok = $true
+      $result.detail = 'snapshot: read only, no action taken'
+      $result.snapId = [string]$snap.snapId
+      $result.frame = $snapFrame
+      $result.frameCheck = $snapCheck
+      $result.frameInset = $snap.frameInset
+      $result.outsideFrame = [int]$snap.outsideFrame
+      $result.intent = [string]$snap.intent
+      $result.total = [int]$snap.total
+      $result.count = [int]$snap.count
+      $result.truncated = [bool]$snap.truncated
+      $result.elements = @($snap.elements)
+      $result.delta = $snap.delta
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    if ($Action -eq 'screenshot') {
+      try {
+        $shot = Get-WpmScreenshot -Hwnd $h -FullScreen $FullScreen -MaxWidth $MaxWidth -Keep $ShotsKeep
+      } catch {
+        $result.refusal = 'action_failed'
+        $result.reason = 'the capture threw: ' + $_.Exception.Message
+        $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+        return $result
+      }
+      if (-not $shot.ok) {
+        $result.refusal = 'action_failed'; $result.reason = [string]$shot.reason
+        $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+        return $result
+      }
+      $result.ok = $true
+      $result.detail = 'screenshot: read only, no action taken'
+      $result.shotId = [string]$shot.shotId
+      $result.file = [string]$shot.file
+      $result.screenRect = $shot.screenRect
+      $result.imageSize = $shot.imageSize
+      $result.scale = [double]$shot.scale
+      $result.identity = [bool]$shot.identity
+      $result.frame = [string]$shot.frame
+      $result.dpiAware = [bool]$shot.dpiAware
+      $result.bytes = [long]$shot.bytes
+      $result.shotsKeep = [int]$shot.shotsKeep
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    # ---- preview: draw the point, report the element under it as TEXT -------------------------
+    $pv = Get-WpmPreviewAt -Hwnd $h -X $X -Y $Y
+    if (-not $pv.ok) {
+      if ($pv.outside) {
+        $result.refusal = 'unreachable'
+        $result.reason = 'the preview point does not belong to the target window: ' + [string]$pv.reason
+      } else {
+        # NOT `unreachable`: the point may be fine. The probe itself failed, so no conclusion about
+        # what is under it is licensed -- the same distinction uia_probe_failed already draws.
+        $result.refusal = 'uia_probe_failed'
+        $result.reason = [string]$pv.reason
+      }
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    # THE MARKER IS A REQUEST, NOT AN ACTION (overlay.ps1 Set-WpmOverlayMarker writes three fields and
+    # returns). A missing overlay downgrades to text only -- it must never fail the preview, because
+    # "what is under this point" is answerable without a picture.
+    $marker = @{ ok = $false; reason = 'overlay not loaded' }
+    try {
+      . (Join-Path $PSScriptRoot 'overlay.ps1')
+      $marker = Set-WpmOverlayMarker -X $X -Y $Y
+    } catch {
+      $marker = @{ ok = $false; reason = 'overlay unavailable: ' + $_.Exception.Message }
+    }
+    $result.ok = $true
+    $result.detail = 'preview: would click ' + $X + ',' + $Y
+    $result.previewX = [int]$X
+    $result.previewY = [int]$Y
+    $result.previewAtPoint = [bool]$pv.atPoint
+    $result.previewName = [string]$pv.name
+    $result.previewControlType = [string]$pv.controlType
+    $result.previewAutomationId = [string]$pv.automationId
+    $result.previewRect = $pv.rect
+    $result.previewReason = [string]$pv.reason
+    $result.markerPlaced = [bool]$marker.ok
+    $result.markerReason = if ($marker.ContainsKey('reason')) { [string]$marker.reason } else { '' }
     $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
     return $result
   }
@@ -198,11 +353,70 @@ function Invoke-WpmAction {
     return $result
   }
 
+  # ---- 0.5.0: image coordinates are converted by the ENGINE, before anything is probed ---------
+  # Why here: a bogus shotId must cost zero target probing, and the converted point then flows through
+  # the EXISTING click path unchanged -- including the point-ownership assertion and the proof window.
+  # Nothing about the safety contract is relaxed by accepting image coordinates.
+  if ($Action -eq 'click' -and $Space -eq 'image') {
+    $conv = Convert-WpmImagePoint -ShotId $ShotId -X $X -Y $Y
+    if (-not $conv.ok) {
+      $result.refusal = if ($conv.stale) { 'stale_ref' } else { 'unreachable' }
+      $result.reason = [string]$conv.reason
+      $result.coordSpace = 'image'
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    $result.coordSpace = 'image'
+    $result.shotId = [string]$ShotId
+    $result.scale = [double]$conv.scale
+    $result.imagePoint = "$X,$Y"
+    $result.screenPoint = "$($conv.x),$($conv.y)"
+    $X = [int]$conv.x
+    $Y = [int]$conv.y
+  }
+
   # Coordinates travel into the probe: the UIA tier resolves the element AT THE POINT. Without them
   # an unnamed click had no way to be anything other than "first control in tree order".
   $probe = Get-WpmFacts -Hwnd $h -Action $Action -ElementName $ElementName -X $X -Y $Y
   $facts = $probe.facts
   $facts.paused = [bool][WpmCtl]::Paused
+  # ---- 0.5.0: a LABEL addresses the element itself -------------------------------------------
+  # The label is resolved back to the UIA element by RuntimeId (measured stable across queries, 71/71),
+  # so the action keeps the silent pattern path and never degrades into a coordinate click. Two things
+  # are then enforced, and they are deliberately redundant:
+  #   * the label must still resolve, otherwise this is a reference to a frame that is gone (stale_ref);
+  #   * for a click, the caller's point must fall inside the labelled element -- "the point is the
+  #     contract" is not weakened by adding a second way to name the target.
+  if ($Label -gt 0) {
+    $res = Resolve-WpmSnapshotLabel -Hwnd $h -Label $Label -SnapId $SnapId
+    if (-not $res.ok) {
+      $result.refusal = 'stale_ref'; $result.reason = [string]$res.reason
+      $result.label = $Label
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    if ($Action -eq 'click' -and $X -ge 0 -and $Y -ge 0) {
+      $lr = $res.row.rect
+      $eps = 2
+      if ($X -lt ([int]$lr.left - $eps) -or $X -gt ([int]$lr.right + $eps) -or
+          $Y -lt ([int]$lr.top - $eps) -or $Y -gt ([int]$lr.bottom + $eps)) {
+        $result.refusal = 'unreachable'
+        $result.reason = "label $Label is at rect=$($lr.left),$($lr.top),$($lr.right),$($lr.bottom) but the click point is $X,$Y -- the label and the point must agree before either is used"
+        $result.label = $Label
+        $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+        return $result
+      }
+    }
+    $probe.uiaElement = $res.element
+    $probe.uiaReason = ''
+    $facts.hasPattern = $true
+    $facts.patternKind = [string]$res.patternKind
+    $facts.uiaTreeEmpty = $false
+    $facts.uiaProbeFailed = $false
+    $facts.messageDoor = $false   # a window message cannot address "label 3"
+    $result.label = $Label
+    $result.snapId = [string]$res.snapId
+  }
   if ($ElementName) {
     # A named control cannot be addressed through a window message: the message tiers take
     # coordinates or a child HWND, and "the Save button" is neither. Suppressing the door here is

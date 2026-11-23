@@ -5,6 +5,127 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> Working date (2026-11-23), not a registry time: at the time this file was written `package.json`
+> was already 0.5.0 and the tarball was built, but publishing needs the owner's sign-off. The
+> registry `time` for 0.5.0 replaces this line when it ships.
+
+**The frame becomes something the caller can read, and the coordinate arithmetic leaves the model.**
+Three read actions, one new refusal code, and one planned invariant that measurement destroyed — kept
+in this entry rather than quietly dropped.
+
+### Added — the read paths
+
+- **`snapshot`**: one `FindAll(Descendants)` + `IsOffscreen` pass, numbered from 1, each row carrying
+  control type, name, automation id, screen rect and the UIA patterns it exposes. Measured: 816
+  descendants / 71 visible / 291 ms on an Electron window; 626 / 173 / 45 excluded on a browser page.
+  `0 element(s)` is reported as a real state and deliberately does **not** reuse `uia_tree_empty`
+  (that code means the application has accessibility switched off, and its next step is a relaunch).
+- **`label` addressing**: `click`/`type`/`focus` accept `label` + `snapId`. The label is resolved back
+  to the UIA **element** by runtime id (measured stable across queries, 71/71), so a labelled action
+  keeps the silent pattern path instead of degrading into a coordinate click. A labelled `click` still
+  requires its point, and the point must fall inside the labelled element.
+- **`screenshot`**: `CopyFromScreen` over the DWM frame, PNG to `%LOCALAPPDATA%\wpm\shots\` (newest
+  `shotsKeep` kept, older files deleted), and the mapping returned as DATA — `screenRect`,
+  `imageSize`, `scale`, `identity`, `frame`, `dpiAware`. The image itself is not inline: a plugin
+  cannot mint an image block without the host's attachment service (measured), so the caller reads
+  the file.
+- **`space:"image"`**: `click` accepts image pixels plus a `shotId` and the ENGINE converts them
+  (`screen = rect.left + round(imageX / scale)`), then runs the unchanged point-ownership assertion,
+  proof window and `effect=` reporting. A shotId that was never issued, or already pruned, is
+  `stale_ref` — never reinterpreted as screen pixels.
+- **`preview`**: draws the marker at a point and reports, as TEXT, the element the OS says is under
+  it (name / control type / automation id / rect). A preview writes no input-queue entry, takes no
+  focus, produces no proof window, and answers with text so confirming a point never depends on a
+  picture.
+- **`stale_ref`**, the fourteenth refusal code: a reference to a previous generation of engine output
+  (a pruned shotId, a superseded snapId, or `space:"image"` with no shotId, which is refused before
+  any worker request). `needs_facts` was not reused: mixing the two would make `check-refusals`'
+  case binding a lie.
+- Three settings: `snapshotMaxElements` (300), `screenshotMaxWidth` (0 = unscaled), `shotsKeep` (10).
+
+### Corrected — the invariant measurement refuted
+
+The plan proposed a runtime self-check: *every reported element rect must be contained in
+`screenRect`*. Measured on eight live windows, it is false for ordinary trees: Chromium/Electron
+report virtualized content far outside the viewport (overhangs of 3px, 18px, 287px and **2720px**),
+so the rule would refuse whole classes of windows. The deeper reason it cannot work: element rects are
+absolute screen pixels; they do not depend on the frame at all, and `GetWindowRect` is *larger* than
+the DWM frame, so a wrong frame is still "containing" everything.
+
+What replaced it, with each part tested for non-vacuity:
+
+- elements that do not overlap the capture are **excluded and counted** (`outsideFrame=N`) — a number
+  you cannot point at would be a trap;
+- the frame is cross-checked against the window rect the accessibility tree itself reports
+  (`frameCheck=pass|fail|unknown`, tolerance 2px; measured insets are exactly `0,0,0,0` for borderless
+  windows and `8,8,8,8` for shadowed ones), and `frameInset` prints those numbers as data;
+- `scripts/check-frame-single-source.mjs` pins the property that *can* be enforced: exactly one
+  function decides the capture rectangle, both consumers use it, only one `CopyFromScreen` site
+  exists, and the snapshot's self-check is wired to a refusal.
+
+### Added — gates and suites
+
+- `scripts/check-shots.mjs`: retention cannot overflow, and a file named `.png` must actually be a
+  PNG (magic + IHDR + non-zero dimensions). Validates the real shots directory and plants its own
+  defects under `--self-test`.
+- `scripts/check-frame-single-source.mjs`: the single-source property above, with four mutations
+  proven red under `--self-test`.
+- Full gate count 17 → **19** (the plan said 18; refuting the runtime invariant made a second
+  structural gate necessary, because a structural claim with no gate rots).
+- `test/geometry-truth.mjs` (45 assertions) and `test/snapshot-test.mjs` (26 assertions), both driven
+  by an app-side oracle plus `test/geometry-oracle.ps1`, an independent DWM/PNG measurement that
+  shares no code with `src/engine`.
+
+### Fixed
+
+- **`uia_tree_empty` was being reported for windows that plainly have a door.** The diagnosis ran
+  whenever the UIA probe found no pattern, including the case where it found no pattern *because the
+  caller named an element*: naming one suppresses a WinForms message door (a window message cannot
+  address "the control called X"), the scan then finds nothing drivable, and the engine answered
+  `uia_tree_empty` — "the application has accessibility switched off; relaunch it with
+  `--force-renderer-accessibility`". That advice is wrong about the cause and does not apply to
+  WinForms at all: we had measured a real door on that window and shut it ourselves. The diagnosis now
+  requires the target to have **no door at all**; a target with a door gets `unreachable` ("nothing
+  addressable at that name"), whose next step exists. Non-vacuity was checked in both directions: the
+  genuine accessibility-off sample (uTools) still answers `uia_tree_empty` from a click, and the
+  WinForms positive control now answers `unreachable`.
+- `test/refusals-test.ps1` could not run three documented decision cases: its facts map never learned
+  R3's `takeoverRequested` / `keyInjectRequested` / `keyInjectAllowed` / `hudReady` /
+  `foregroundIsTarget`, so they threw `unknown facts field` instead of exercising the code. Found by
+  running the suite at HEAD, where it was already red.
+- **The cursor-drift assertions were flake generators, and one of them was hiding in the gate.**
+  "Is the pointer back" is graded from two external reads, and the pointer is shared with the owner.
+  Measured with a human at the desk: the same assertion produced drift of 11 px, then 213, then 649,
+  while re-running with nobody touching the mouse passed every time — the instrument was reading
+  somebody else's motion. `signal-test` and `takeover-test` now grade that assertion only when
+  `GetLastInputInfo` shows no physical input inside the measured window, and SKIP with the age and the
+  window printed otherwise (the same discipline `overlay-test` already used for its desktop-sensitive
+  arms). Both halves were verified: with input present it SKIPs and says why; after a 7-second lull it
+  PASSes and actually grades. The interference-free half — the engine's own `cursorAfterX/Y` read-back
+  must equal `cursorBeforeX/Y` exactly — stays a hard assertion in both suites.
+- `Invoke-WpmAction` no longer makes `-Hwnd` mandatory: PowerShell refuses to bind an empty string to
+  a mandatory `[string]`, which turned a legitimate full-screen capture into a binding error. Every
+  windowed action still checks liveness and answers `no_hwnd`.
+
+### Notes
+
+- Non-vacuity was proven by injection, not asserted: the rect comparison rejects the `GetWindowRect`
+  rect and a +10px shift; a generated all-white PNG reads blank; the frame predicate says yes to the
+  measured pair and no to a frame that pokes outside it; every structural mutation turns its gate red.
+- Two things this release did **not** fix, stated rather than hidden:
+  - This host's `UIAutomationClient` has no `LegacyIAccessiblePattern` type at all (measured:
+    `Unable to find type`), so any target that exposes only the MSAA bridge — WinForms among them —
+    can never yield a pattern here. The engine already treats a missing pattern type as one missing
+    type rather than a dead engine, and the WinForms cases now answer honestly, but the *capability*
+    is absent on this machine and the docs do not claim otherwise.
+  - `maxElements` truncates in **tree order**, not by relevance. On an Explorer window the first 40
+    elements are the status bar, so "the control is not in the frame" can mean merely "the cap was
+    low". The next step is printed with the frame (raise `maxElements`, or set
+    `interactableOnly:false`); no relevance ranking was invented, because "why is this row ranked
+    higher" is a question the tool could not answer with a fact.
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).

@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> 0.5.0 hace legible el «marco» para quien llama y saca el cálculo de coordenadas de manos del modelo: tres acciones de solo lectura (`snapshot` como tabla numerada de elementos, `screenshot` que devuelve la tabla de correspondencia, `preview` que informa en texto el elemento bajo un punto), direccionamiento por `label` resuelto al elemento por su RuntimeId, `space:"image"` convertido por el motor, y un decimocuarto código de rechazo `stale_ref`. El invariante previsto «todo rect de elemento está contenido en screenRect» quedó refutado por la medición (desbordes de 3/18/287/2720px, y un rect es una coordenada absoluta de pantalla, independiente del marco): se sustituye por exclusión contada de elementos fuera de la captura, comprobación cruzada del marco con el rect que declara el árbol (frameCheck/frameInset) y una puerta estructural de fuente única. Puertas 17→19, dos suites con oráculo independiente. Detalle en la entrada inglesa.Dos correcciones más: `uia_tree_empty` ya no se informa para ventanas que sí tienen una puerta pero la suprimieron con `elementName` (WinForms responde ahora `unreachable`), y la aserción de deriva del cursor que ponía la puerta en rojo de forma intermitente ahora excluye el movimiento del dueño mediante `GetLastInputInfo` (SKIP con age/ventana si hubo entrada; el read-back exacto del motor sigue siendo una aserción estricta).
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).

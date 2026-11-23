@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> 0.5.0 macht den „Rahmen“ für Aufrufer lesbar und nimmt die Koordinatenrechnung aus der Hand des Modells: drei Lese-Aktionen (`snapshot` als nummerierte Elementtabelle, `screenshot` mit der Zuordnung als Daten, `preview` mit dem Element unter einem Punkt als Text), `label`-Adressierung über die RuntimeId auf das Element zurückgeführt, `space:"image"` vom Motor umgerechnet, und ein vierzehnter Ablehnungscode `stale_ref`. Die geplante Invariante „jedes Element-Rect liegt in screenRect“ wurde durch Messung widerlegt (Überstände von 3/18/287/2720px; ein Rect ist eine absolute Bildschirmkoordinate und hängt gar nicht vom Rahmen ab) — ersetzt durch gezähltes Ausschließen nicht überlappender Elemente, einen Kreuzvergleich des Rahmens mit dem vom Baum gemeldeten Fenster-Rect (frameCheck/frameInset) und ein Struktur-Gate für die einzige Rahmenquelle. Gates 17→19, zwei unabhängige Oracle-Suiten. Details im englischen Eintrag.Zwei weitere Korrekturen: `uia_tree_empty` wird nicht mehr für Fenster gemeldet, die eine Tür haben, deren Tür aber durch `elementName` unterdrückt wurde (WinForms antwortet jetzt `unreachable`), und die Cursor-Drift-Assertion, die das Gate sporadisch rot färbte, schließt die Bewegung des Besitzers über `GetLastInputInfo` aus (SKIP mit age/Fenster bei Eingabe; der exakte Read-back des Motors bleibt eine harte Assertion).
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).

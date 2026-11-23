@@ -112,6 +112,22 @@ pass = run('takeover path structure (G1-G5, self-tested)', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// 0.5.0's TWO NEW STRUCTURAL GATES, and why they are structural. The plan proposed a runtime
+// invariant ("every element rect is contained in screenRect"); measurement refuted it on real trees
+// (scrolled/virtualized content overhangs by 3px to 2720px), so the honest replacement is two
+// properties of the CODE: exactly one function decides the capture rectangle, and the screenshot
+// directory cannot grow while holding files that are not pictures. Both run with --self-test, so each
+// assertion has been seen red on a mutated copy -- a gate that has never been red is a comment.
+pass = run('frame source is single (DWM one-way, self-tested)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-frame-single-source.mjs', '--self-test'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
+pass = run('screenshot hygiene (retention + PNG reality, self-tested)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-shots.mjs', '--self-test'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 // The package that gets installed is the product. A missing engine file or a swept-in .tmp/ both
 // install cleanly and fail later, so the tarball is checked here rather than discovered at install.
 pass = run('package tarball contents', () => {

@@ -129,6 +129,10 @@ while ($true) {
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action click `
           -X ([int](Get-Arg $req 'x' -1)) -Y ([int](Get-Arg $req 'y' -1)) `
           -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
+          -Space ([string](Get-Arg $req 'space' 'screen')) `
+          -ShotId ([string](Get-Arg $req 'shotId' '')) `
+          -Label ([int](Get-Arg $req 'label' 0)) `
+          -SnapId ([string](Get-Arg $req 'snapId' '')) `
           -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
           -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000)) `
           -KeyInject:([bool](([string](Get-Arg $req 'keyInput' 'none')) -eq 'inject')) `
@@ -139,6 +143,8 @@ while ($true) {
       'type' {
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action type `
           -Text ([string](Get-Arg $req 'text' '')) -ElementName ([string](Get-Arg $req 'elementName' '')) `
+          -Label ([int](Get-Arg $req 'label' 0)) `
+          -SnapId ([string](Get-Arg $req 'snapId' '')) `
           -Replace:([bool](Get-Arg $req 'replace' $false)) -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
           -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
           -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000)) `
@@ -149,9 +155,37 @@ while ($true) {
       }
       'focus' {
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action focus `
-          -ElementName ([string](Get-Arg $req 'elementName' '')) -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
+          -ElementName ([string](Get-Arg $req 'elementName' '')) `
+          -Label ([int](Get-Arg $req 'label' 0)) `
+          -SnapId ([string](Get-Arg $req 'snapId' '')) `
+          -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
           -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
           -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000))
+        Write-Response $id @{ id = $id; ok = $true; result = $r }
+      }
+      'snapshot' {
+        # Read path (0.5.0). The cap comes from the host settings (snapshotMaxElements), which sends it
+        # as maxElements; interactableOnly defaults ON because the whole point of the frame is to be
+        # small enough for a decision, not to be an exhaustive dump.
+        $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action snapshot `
+          -MaxElements ([int](Get-Arg $req 'maxElements' 300)) `
+          -InteractableOnly ([bool](Get-Arg $req 'interactableOnly' $true)) `
+          -SinceSnapId ([string](Get-Arg $req 'sinceSnapId' '')) `
+          -Intent ([string](Get-Arg $req 'intent' ''))
+        Write-Response $id @{ id = $id; ok = $true; result = $r }
+      }
+      'screenshot' {
+        $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action screenshot `
+          -FullScreen ([bool](Get-Arg $req 'fullScreen' $false)) `
+          -MaxWidth ([int](Get-Arg $req 'maxWidth' 0)) `
+          -ShotsKeep ([int](Get-Arg $req 'shotsKeep' 10))
+        Write-Response $id @{ id = $id; ok = $true; result = $r }
+      }
+      'preview' {
+        # Silent by construction: the marker is a click-through request and nothing is serialised into
+        # any input queue. No proof window is produced -- there is no action to prove.
+        $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action preview `
+          -X ([int](Get-Arg $req 'x' -1)) -Y ([int](Get-Arg $req 'y' -1))
         Write-Response $id @{ id = $id; ok = $true; result = $r }
       }
       'hud' {

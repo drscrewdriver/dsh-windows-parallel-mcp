@@ -85,7 +85,7 @@ ok('every contract tool name is mapped, and nothing extra', JSON.stringify(proje
 
 const schema = parametersToJsonSchema(PARAMETERS);
 ok('the action discriminator is required', schema.required.includes('action'), JSON.stringify(schema.required));
-ok('the discriminator enum equals the five actions', JSON.stringify([...schema.properties.action.enum].sort()) === JSON.stringify(projectedActions),
+ok('the discriminator enum equals the eight actions', JSON.stringify([...schema.properties.action.enum].sort()) === JSON.stringify(projectedActions),
   JSON.stringify(schema.properties.action.enum));
 ok('the registered schema forbids undeclared arguments', schema.additionalProperties === false);
 
@@ -130,6 +130,10 @@ ok('status reports a refusal-free result', status.refusal === undefined || statu
 ok('status reports the overlay state', /\boverlay=(on|off)\b/.test(status.text), status.text?.slice(0, 240));
 ok('status reports which pause hotkey actually registered',
   /\bpauseHotkey=(unavailable|[A-Za-z+]+)/.test(status.text), status.text?.slice(0, 240));
+// The read paths' coordinates are physical only while the process is DPI aware; the honest way to keep
+// that from becoming a silent half-scale system is to make the stance a readable fact, not a promise.
+ok('status reports dpiAware, the fact every snapshot rect and screenshot pixel depends on',
+  /\bdpiAware=(true|false)\b/.test(status.text), status.text?.slice(0, 300));
 
 const wins = await tool.execute({ action: 'windows' });
 ok('windows reaches the engine', wins.ok === true && wins.text.length > 0, wins.text?.slice(0, 160));
@@ -163,6 +167,57 @@ ok('the empty-write refusal uses a real code', ['unreachable', 'no_hwnd'].includ
 
 const missingArg = await tool.execute({ action: 'focus', hwnd: '1' });
 ok('a missing required argument is refused with a code', missingArg.ok === false, JSON.stringify(missingArg).slice(0, 160));
+
+// ---- 0.5.0: image coordinates without a shotId cost ZERO worker requests ---------------------
+// "space:'image' with no shotId" is not a coordinate the engine can interpret, and reinterpreting the
+// raw numbers as screen pixels would click somewhere plausibly wrong. The refusal has to happen before
+// the expensive part, or "the check exists" and "the check is checked first" are indistinguishable.
+{
+  const { WorkerClient } = await import('../lib/engine.js');
+  const original = WorkerClient.prototype.request;
+  const seen = [];
+  WorkerClient.prototype.request = function patched(payload) {
+    seen.push(payload);
+    return original.call(this, payload);
+  };
+  try {
+    const imgCtx = makeCtx();
+    mod.apply(imgCtx, {});
+    const imgTool = imgCtx.registered[0];
+    const noShot = await imgTool.execute({ action: 'click', hwnd: '1', x: 10, y: 20, space: 'image' });
+    ok('space:"image" without a shotId is refused with stale_ref, not reinterpreted',
+      noShot.ok === false && noShot.refusal === 'stale_ref', JSON.stringify(noShot).slice(0, 200));
+    ok('  ... and it costs no worker request at all', seen.length === 0, JSON.stringify(seen));
+
+    // A label with no snapshot behind it can only be judged by the engine, so THAT one does travel.
+    // It needs a LIVE hwnd though: liveness is checked before the label is resolved, and a dead handle
+    // must stay no_hwnd rather than being reported as a stale reference (the two have different next
+    // steps). Asserting both keeps the ordering from drifting.
+    const liveHwnd = (wins.text || '').split('\n').slice(1).map((l) => l.trim().split(/\s+/)[0]).find(Boolean) || '';
+    const beforeDead = seen.length;
+    const deadLabel = await imgTool.execute({ action: 'click', hwnd: '1', x: 10, y: 20, label: 3, snapId: 'snap-nope' });
+    ok('a label on a dead hwnd is still no_hwnd (liveness outranks the reference check)',
+      deadLabel.refusal === 'no_hwnd', JSON.stringify(deadLabel).slice(0, 180));
+    ok('  ... and liveness is decided by the ENGINE, so that call did travel (unlike the shotId gate)',
+      seen.length === beforeDead + 1, `requests ${beforeDead}->${seen.length}`);
+    if (liveHwnd) {
+      const beforeLive = seen.length;
+      const labelOnly = await imgTool.execute({ action: 'click', hwnd: liveHwnd, x: 10, y: 20, label: 3, snapId: 'snap-nope' });
+      ok('a label with no live frame behind it is refused with stale_ref',
+        labelOnly.refusal === 'stale_ref', JSON.stringify(labelOnly).slice(0, 220));
+      ok('  ... and it too reached the engine exactly once',
+        seen.length === beforeLive + 1, `requests ${beforeLive}->${seen.length}`);
+    }
+
+    // The read paths themselves must be reachable through the projection (a registered action the
+    // engine cannot serve would look installed and fail).
+    const shotFull = await imgTool.execute({ action: 'screenshot', fullScreen: true });
+    ok('a full-screen screenshot is served without an hwnd', shotFull.ok === true, `${shotFull.refusal} ${String(shotFull.text).slice(0, 160)}`);
+    await imgCtx.dispose();
+  } finally {
+    WorkerClient.prototype.request = original;
+  }
+}
 
 // ---- the effect dimension reaches the caller (R1) -------------------------------------------
 // The engine has always computed `effect` (src/engine/engine.ps1); 0.1.2 dropped it on the floor, so

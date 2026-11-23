@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> 0.5.0 は「フレーム」を呼び出し側が読めるものにし、座標計算をモデルの手から取り上げるリリース。読み取り専用の 3 アクション（`snapshot` の番号付き要素表、`screenshot` は対応表ごと返す、`preview` は点の下の要素をテキストで報告）、`label` を RuntimeId で要素に戻す仕組み、`space:"image"` のエンジン側換算、14 番目の拒否コード `stale_ref` を追加。計画にあった「要素 rect は screenRect に含まれる」不変条件は実測で否定された（3/18/287/2720px のはみ出し、かつ rect は絶対スクリーン座標でフレーム非依存）ため、はみ出し要素の除外＋計数、フレームとツリー自己申告矩形の相互検査、単一フレーム源の構造ゲートに置き換えた。ゲートは 17→19。詳細は英語の正式項目を参照。さらに 2 件修正：`uia_tree_empty` が「本来ドアがあるのに elementName で抑制されただけ」の窓に誤って出なくなり（WinForms は `unreachable` を返す）、ゲートを稀に赤くしていたカーソル移動量の判定は `GetLastInputInfo` で操作者の入力を除外（入力があれば age/window を添えて SKIP、エンジン自身の read-back は厳格なまま）した。
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).

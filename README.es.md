@@ -5,7 +5,7 @@
 > Un plugin DSH que permite a un agente controlar **sus propias** ventanas de Windows — silencioso por defecto, visible cuando se pide. Cuando una ventana acepta mensajes de Windows, el foco nunca se pierde. Cuando solo UI Automation puede alcanzarla, el foco sufre un único destello acotado que se revierte automáticamente. Cuando pides explícitamente el modo takeover, el cursor se mueve al punto de acción y siempre se restaura, con un HUD que ofrece tres formas de interrumpir. En cualquier otro caso, rechaza con un código y una razón.
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.4.1** — this document describes the contract as of that version. What
+> **Current release: 0.5.0** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
@@ -13,7 +13,7 @@ on request. Where a window accepts a window message, you never lose focus at all
 exposes UI Automation, you lose focus for one bounded flash that is reversed automatically. Where you
 explicitly ask for the takeover tier, the cursor moves to the point and is always restored, with a
 HUD that can stop it three ways. Everywhere else it refuses, with a code and a reason — never with
-silence: every refusal carries a code from a closed set of thirteen and the next step.
+silence: every refusal carries a code from a closed set of fourteen and the next step.
 
 **The takeover tier defaults off, and that is structural.** The cursor is only ever moved because you
 opened `takeoverAllowed` **and** asked for it on the call (`takeover:true`), so an upgrade cannot
@@ -31,15 +31,18 @@ bundle with a broad tool surface; this one is a single action tool whose entire 
 
 ## What it does
 
-One tool, five actions:
+One tool, eight actions:
 
 | action | what it returns |
 |---|---|
 | `windows` | live windows that can be driven: hwnd, title, class, pid, rect |
 | `status` | what currently holds the foreground and the keyboard focus, and whether the engine is paused |
-| `click` | click at a screen coordinate inside the named window |
-| `type` | write text into the target (a classic edit child, or a named UIA element) |
-| `focus` | move keyboard focus to a named control inside the target |
+| `click` | click at a screen coordinate inside the named window, or at a snapshot `label` |
+| `type` | write text into the target (a classic edit child, a named UIA element, or a `label`) |
+| `focus` | move keyboard focus to a named control inside the target, or to a `label` |
+| `snapshot` | the accessibility tree as a NUMBERED element table: continuous `label`, control type, name, automation id, screen rect, patterns |
+| `screenshot` | the window rect captured to a PNG, plus the coordinate mapping as data (`screenRect`, `imageSize`, `scale`, `identity`, `frame`, `dpiAware`) |
+| `preview` | the marker drawn at a point, and the element under it reported as TEXT — no picture needed |
 
 The engine picks the cheapest available door per call:
 
@@ -72,8 +75,69 @@ flag itself is engine-side and refuses actions with `paused`.
 
 Refusals are a normal result, not an error: `no_hwnd`, `paused`, `elevated_target`, `unreachable`,
 `uia_tree_empty`, `uia_probe_failed`, `terminal_no_door`, `needs_facts`, `takeover_unavailable`,
-`keyinject_unavailable`, `action_failed`, `restore_failed`, `takeover_aborted`. Each carries a reason
-and a next step — see [docs/refusals.md](docs/refusals.md).
+`keyinject_unavailable`, `action_failed`, `restore_failed`, `takeover_aborted`, `stale_ref`. Each
+carries a reason and a next step — see [docs/refusals.md](docs/refusals.md).
+
+## Reading the frame instead of guessing
+
+The three read actions exist so the two halves of a click — *where the thing is* and *where the
+picture is* — stop being the caller's arithmetic.
+
+`label` is not a coordinate in disguise. It is resolved back to the UIA **element** by its runtime id
+(measured stable across queries, 71 of 71), so `click`/`type`/`focus` with `label` + `snapId` still
+take the silent pattern path. A labelled `click` keeps `x`/`y` required, and the point must fall
+inside the labelled element's rect — the point stays the contract. A label whose `snapId` was
+superseded is refused with `stale_ref`: element numbers only mean something in the frame that printed
+them.
+
+Image coordinates are never multiplied by the caller:
+
+```jsonc
+{"action":"screenshot","hwnd":"1310720"}
+// -> screenRect=0,0,1920,1032 imageSize=1920x1032 scale=1 identity=true frame=dwm
+{"action":"click","hwnd":"1310720","space":"image","shotId":"shot-…","x":350,"y":250}
+// the ENGINE converts, then still asserts the point belongs to the target window
+```
+
+The picture is not returned inline — a plugin cannot mint an inline image block without the host's
+attachment service — so the PNG is written to `%LOCALAPPDATA%\wpm\shots\` (newest `shotsKeep` kept)
+and read with the host's image reader. `preview` is the cheaper confirmation: it draws the marker at
+the point and answers, as text, which element the OS says is there. Confirming a point therefore
+never depends on looking at a picture, and a preview writes no input-queue entry, takes no focus and
+produces no proof window.
+
+### The frame rule, and why 8px mattered
+
+One rectangle decides everything: `DwmGetWindowAttribute(EXTENDED_FRAME_BOUNDS)`. Measured here,
+`GetWindowRect` is **8px larger on every edge** — the invisible resize shadow — and the accessibility
+tree mixes the two spaces: its root element reports the shadow-inclusive rect while its children
+report the real one, so arithmetic that mixes them is 8px wrong and *looks right*. Labels and the
+captured picture therefore come from the same function. When DWM is unavailable (RDP, Basic theme)
+the fallback to `GetWindowRect` is **reported** as `frame=win32` rather than swallowed, and
+`frameInset` prints the shadow width as data.
+
+The plan for this release proposed a runtime invariant — "every element rect is inside `screenRect`" —
+and measurement refuted it: real Chromium/Electron trees report virtualized content far outside the
+viewport (overhangs of 3px, 18px, 287px and 2720px measured here). What replaced it: elements that do
+not overlap the capture are **excluded and counted** (`outsideFrame=…`, because a number you cannot
+point at would be a trap), the frame is cross-checked against the window rect the tree itself reports
+(`frameCheck=pass|fail|unknown`), and a structural gate pins the single-source rule by mutating a copy
+of the engine and requiring the corresponding red.
+
+### Deciding outside the main context
+
+The expensive habit this replaces is re-reading a 70-row table on every step. Hand the frame to a
+clean deciding side and take back one number:
+
+1. `snapshot` with `intent:"close the settings dialog"` — the intent travels with the frame, and is
+   written to `%LOCALAPPDATA%\wpm\last-snapshot.json`;
+2. give the numbered table and the intent to a clean subagent;
+3. it answers with a single `label` — not a selector, not a coordinate;
+4. click with that `label` + `snapId`.
+
+`sinceSnapId` serves the same goal: an unchanged tree answers `no changes since <id>` instead of
+repeating itself, and a delta names only what actually moved (`added` / `removed` / `changed`, keyed
+by runtime id).
 
 **Every real click carries its own disturbance proof.** `click` returns a `proof=pass|inconclusive|…`
 verdict plus a `proofDimensions` field (cursor / foreground / focus). Around your call the engine
@@ -189,8 +253,8 @@ degradation.
 ## Typed surface
 
 `types/index.d.ts` is written by hand, not emitted from an implementation. It covers the whole
-contract: the five actions, every argument including the takeover fields, and all thirteen refusal
-codes as a closed union.
+contract: the eight actions, every argument including the takeover fields and the image-space /
+label surface, and all fourteen refusal codes as a closed union.
 
 Its wiring is measured in both resolution modes a consumer can use, rather than assumed from the
 presence of a file:
@@ -222,6 +286,9 @@ when one is present, and the gate reports a named SKIP rather than a red when on
 | `keyInjectAllowed` | `false` | allow `keyInput:"inject"` inside the takeover tier (keyboard only, foreground asserted) |
 | `takeoverMaxMs` | `10000` | hard ceiling for one takeover action (500–60000); the HUD shows the clock |
 | `takeoverArmMs` | `800` | length of the arming phase: the window in which you can cancel before anything moves |
+| `snapshotMaxElements` | `300` | cap on elements per snapshot (1–5000); a tighter cap is a smaller frame for a deciding subagent |
+| `screenshotMaxWidth` | `0` | downscale captures to this width; `0` means no scaling and `scale=1` — a resized image is a different coordinate system, so it is never chosen silently |
+| `shotsKeep` | `10` | how many PNGs stay in `%LOCALAPPDATA%\wpm\shots`; older files are deleted after each capture |
 
 ## What measurement established
 

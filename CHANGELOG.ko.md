@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> 0.5.0은 「프레임」을 호출자가 읽을 수 있게 만들고 좌표 계산을 모델의 손에서 떼어낸 릴리스입니다. 읽기 전용 액션 3종(`snapshot` 번호 요소표, `screenshot`은 매핑까지 반환, `preview`는 지점 아래 요소를 텍스트로 보고), `label`을 RuntimeId로 요소에 되돌리는 방식, `space:"image"`의 엔진 환산, 14번째 거부 코드 `stale_ref`를 추가했습니다. 계획의 「모든 요소 rect는 screenRect 안에 있어야 한다」 불변식은 실측으로 반박되었습니다(3/18/287/2720px 초과, rect는 절대 화면 좌표라 프레임과 무관). 대신 초과 요소 제외·계수, 프레임과 트리 자기신고 사각형의 상호 검사, 단일 프레임 소스 구조 게이트로 바꿨습니다. 게이트 17→19. 자세한 내용은 영어 정본 항목 참조.두 가지 추가 수정: `uia_tree_empty`가 「원래 문이 있는데 elementName 때문에 억제된」 창에 더 이상 잘못 나오지 않고(WinForms는 `unreachable`), 게이트를 간헐적으로 붉히던 커서 이동량 판정은 `GetLastInputInfo`로 사용자의 입력을 제외(입력이 있으면 age/window를 출력하고 SKIP, 엔진 자체 read-back은 여전히 엄격)했다.
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).

@@ -1,10 +1,10 @@
 {
   "schemaVersion": "0.1.0",
-  "status": "form decided 2026-11-19: A = DSH native plugin (no MCP). The five named tools below stay the canonical ACTION surface; the host projection (see hostProjection) exposes them as one tool with an action discriminator, which is this host's convention for a multi-action capability.",
+  "status": "form decided 2026-11-19: A = DSH native plugin (no MCP). The eight named tools below stay the canonical ACTION surface; the host projection (see hostProjection) exposes them as one tool with an action discriminator, which is this host's convention for a multi-action capability.",
   "hostProjection": {
     "form": "A",
     "decided": "2026-11-19",
-    "why": "root cause: five resident tool schemas describing one engine is a standing per-turn token cost with no added capability; the host's own shell/terminal tools are one-tool-with-action. The action surface here is unchanged -- same five actions, same arguments, same refusal codes.",
+    "why": "root cause: five resident tool schemas describing one engine is a standing per-turn token cost with no added capability; the host's own shell/terminal tools are one-tool-with-action. The action surface here is unchanged -- same actions, same arguments, same refusal codes (0.5.0 added three read-only actions to the SAME one tool, so the token argument still holds).",
     "package": "dsh-windows-parallel-mcp",
     "tool": "wpm",
     "discriminator": "action",
@@ -14,7 +14,10 @@
       "wpm_click": "click",
       "wpm_type": "type",
       "wpm_focus": "focus",
-      "wpm_status": "status"
+      "wpm_status": "status",
+      "wpm_snapshot": "snapshot",
+      "wpm_screenshot": "screenshot",
+      "wpm_preview": "preview"
     },
     "extraWorkerActions": [
       { "action": "ping", "exposed": false, "why": "protocol/encoding self-test; not part of the tool surface" },
@@ -22,10 +25,11 @@
     ]
   },
   "notes": [
-    "The five tool names are fixed here so both delivery forms expose the same action surface.",
+    "The eight tool names are fixed here so both delivery forms expose the same action surface.",
     "src/engine/engine.ps1 is the only implementation; this file is the contract, not a second implementation.",
     "docs/refusals.md is the human-readable form of `refusals`; scripts/check-refusals.mjs keeps them equal.",
-    "The `refusalCases` array is executable: test/refusals-test.ps1 iterates it and binds the placeholders, so a documented refusal path cannot rot into fiction."
+    "The `refusalCases` array is executable: test/refusals-test.ps1 iterates it and binds the placeholders, so a documented refusal path cannot rot into fiction.",
+    "0.5.0 adds snapshot/screenshot/preview. They are READ paths: `snapshot` walks the accessibility tree and hands the model numbered `label`s, `screenshot` captures the window rect and returns the coordinate mapping as data, `preview` draws the marker at a point and reports the element UNDER it as text. No new input primitive, no automatic fallback chain -- the model decides."
   ],
   "stance": {
     "inputQueue": "quiet and bounded-flash tiers write nothing to the OS input queue. The takeover tier (opt-in, takeoverAllowed) may send KEYBOARD input (SendInput + KEYEVENTF_UNICODE) only when keyInput='inject' was requested; mouse injection is structurally impossible (MOUSEEVENTF_* is banned repo-wide and the gate enforces it)",
@@ -47,6 +51,7 @@
     { "code": "takeover_unavailable", "layer": "decision", "summary": "takeover was requested but cannot run safely: the takeoverAllowed gate is off or the HUD is not up. The request is refused rather than silently downgraded" },
     { "code": "keyinject_unavailable", "layer": "decision", "summary": "keyboard injection was requested outside the takeover tier, with the keyInjectAllowed gate off, or with the target not in the foreground (SendInput writes to the foreground, so a blind injection would type into another application)" },
     { "code": "action_failed", "layer": "runtime", "summary": "the chosen channel threw while acting", "uncoveredReason": "needs a target whose channel reliably throws; not constructed this round (docs/refusals.md, gap 2)" },
+    { "code": "stale_ref", "layer": "runtime", "summary": "the call names a previous generation of engine output that no longer exists: a shotId that was cleaned up, a label whose snapId was superseded, or space:'image' without any shotId. Read paths are cheap; re-take the snapshot/screenshot and act on the new ids instead of substituting coordinates" },
     { "code": "restore_failed", "layer": "runtime", "summary": "the OS refused to return the foreground after a flash", "uncoveredReason": "needs a real elevated window; task_52 (docs/refusals.md, gap 2)" },
     { "code": "takeover_aborted", "layer": "runtime", "summary": "the owner or the host interrupted a takeover (HUD button, abort chord, host cancellation). Not a fault: the result still carries cursorRestored and injectedChars so the reader knows exactly how far it got", "uncoveredReason": "fires from a real interruption inside a live takeover action; test/takeover-test.ps1 covers the three interruption paths at the engine level (volatile flag, latch file, and the send-time abort probe), and the schema case is declared uncovered because the refusal vocabulary gate needs an executable decision-mode instance and this is a runtime outcome" }
   ],
@@ -69,13 +74,17 @@
       "name": "wpm_click",
       "action": "click",
       "engine": "Invoke-WpmAction -Action click",
-      "description": "Click at a screen coordinate inside the named window. Chooses the cheapest available door: a classic child window receives the click as a window message (quiet tier, measured 0/6 foreground changes), otherwise a UIA pattern is used and the foreground is reversed once afterwards (bounded-flash tier, measured net return 15..95 ms). The cursor does not move in either tier.",
+      "description": "Click at a screen coordinate inside the named window, or at the element named by a snapshot `label`. Chooses the cheapest available door: a classic child window receives the click as a window message (quiet tier, measured 0/6 foreground changes), otherwise a UIA pattern is used and the foreground is reversed once afterwards (bounded-flash tier, measured net return 15..95 ms). The cursor does not move in either tier. With `space:\"image\"` the coordinates are IMAGE pixels from a `screenshot` and the engine converts them back to screen pixels -- the caller never multiplies a scale factor.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "hwnd": { "type": "string", "description": "Target top-level window handle, as returned by wpm_windows." },
-          "x": { "type": "integer", "description": "Screen X coordinate. Must resolve to a child window of the target, otherwise the action is refused instead of being sent somewhere else." },
-          "y": { "type": "integer", "description": "Screen Y coordinate." },
+          "x": { "type": "integer", "description": "Screen X coordinate (or image X with space:'image'). Must resolve to a child window of the target, otherwise the action is refused instead of being sent somewhere else." },
+          "y": { "type": "integer", "description": "Screen Y coordinate (or image Y with space:'image')." },
+          "space": { "type": "string", "enum": ["screen", "image"], "default": "screen", "description": "Coordinate space of x/y. 'screen' (default) is physical screen pixels. 'image' means image pixels from the screenshot named by shotId; the engine converts them and still applies the point-ownership assertion, so a conversion bug cannot send the click to another window." },
+          "shotId": { "type": "string", "description": "The shotId returned by wpm_screenshot. Required when space:'image' (a pre-worker refusal otherwise); an id that was already cleaned up is refused with stale_ref rather than reinterpreted." },
+          "label": { "type": "integer", "minimum": 1, "description": "Element number from wpm_snapshot. Act on that element through its UIA pattern instead of guessing from the point. x/y are still required and must fall inside the labelled element's rect, so 'the point is the contract' stays true." },
+          "snapId": { "type": "string", "description": "The snapId the label came from. A label whose snapId has been superseded is refused with stale_ref -- element numbers are only meaningful for the frame they were printed in." },
           "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." },
           "takeover": { "type": "boolean", "default": false, "description": "Take the takeover tier: the real cursor moves to the action point and is always restored, the focus is held until the action ends, and a three-phase HUD is mandatory. Requires the takeoverAllowed setting or the call is refused with takeover_unavailable." },
           "takeoverMaxMs": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 10000, "description": "Takeover only: how long the action may hold the cursor/focus." }
@@ -83,7 +92,7 @@
         "required": ["hwnd", "x", "y"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "stale_ref", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted"]
     },
     {
       "name": "wpm_type",
@@ -96,6 +105,8 @@
           "hwnd": { "type": "string", "description": "Target top-level window handle." },
           "text": { "type": "string", "description": "Text to write. Empty string is refused: it cannot be distinguished from a channel that silently did nothing." },
           "elementName": { "type": "string", "description": "Optional UIA Name or AutomationId of the control to write into. Naming an element forces the UIA tier, because a message tier cannot address 'the control called X'." },
+          "label": { "type": "integer", "minimum": 1, "description": "Element number from wpm_snapshot: write into that element through its UIA pattern. A faster, unambiguous alternative to elementName on a tree you have already read." },
+          "snapId": { "type": "string", "description": "The snapId the label came from; a superseded snapId is refused with stale_ref." },
           "replace": { "type": "boolean", "default": false, "description": "Replace the existing value instead of appending to it." },
           "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." },
           "takeover": { "type": "boolean", "default": false, "description": "Take the takeover tier: the HUD is shown, the focus is held until the action ends, and (with keyInput) text may be typed into the foreground target." },
@@ -117,6 +128,8 @@
         "properties": {
           "hwnd": { "type": "string", "description": "Target top-level window handle." },
           "elementName": { "type": "string", "description": "UIA Name or AutomationId of the control that should hold focus." },
+          "label": { "type": "integer", "minimum": 1, "description": "Element number from wpm_snapshot: focus that element. A faster, unambiguous alternative to elementName on a tree you have already read." },
+          "snapId": { "type": "string", "description": "The snapId the label came from; a superseded snapId is refused with stale_ref." },
           "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." },
           "takeover": { "type": "boolean", "default": false, "description": "Take the takeover tier: the HUD is shown and the focus is held until the action ends, then restored. Requires the takeoverAllowed setting." },
           "takeoverMaxMs": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 10000, "description": "Takeover only: how long the action may hold the cursor/focus." }
@@ -139,6 +152,59 @@
       },
       "refusals": [],
       "noRefusalReason": "pure query: it reads the focus table and returns it. There is no target to refuse, and inventing a refusal code for this tool would create a branch that can never be exercised."
+    },
+    {
+      "name": "wpm_snapshot",
+      "action": "snapshot",
+      "engine": "Invoke-WpmAction -Action snapshot",
+      "description": "Read the target's accessibility tree as a NUMBERED element table: one line per element with a continuous `label`, its control type, name, automation id, screen rect (physical pixels) and the UIA patterns it exposes. This is the frame the model reasons on and the label it answers with -- pass `label`+`snapId` to click/type/focus instead of guessing coordinates. The labels are resolved back to the ELEMENT (by UIA RuntimeId, measured stable across queries), so an action taken by label still uses the silent UIA pattern path and never degrades into a coordinate click. Read-only: no input, no focus change, no proof window. '0 element(s)' is a real answer (measured on windows that disable UI Automation) and is reported as such, not as a failure.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hwnd": { "type": "string", "description": "Target top-level window handle from wpm_windows." },
+          "maxElements": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 300, "description": "Hard cap on returned elements; the text then says 'truncated at N of M' and `truncated` is true. Measured trees: 71 visible elements for an 816-node Electron window, so the default is deliberately loose." },
+          "interactableOnly": { "type": "boolean", "default": true, "description": "Return only elements that expose a usable UIA pattern (the zero-cost first pass at a giant tree). Set false to see the whole visible tree, chrome included." },
+          "sinceSnapId": { "type": "string", "description": "Report an incremental diff against this earlier snapId instead of re-describing every element: added / removed / changed, keyed by UIA RuntimeId. An unchanged tree produces an empty delta, which is the point -- repeating an unchanged table is the main token cost of a multi-step flow." },
+          "intent": { "type": "string", "description": "What this frame is FOR (e.g. 'close the settings dialog'). It travels with the frame so a clean deciding subagent gets the goal and the numbered table together and answers with one label." }
+        },
+        "required": ["hwnd"],
+        "additionalProperties": false
+      },
+      "refusals": ["no_hwnd", "paused", "uia_probe_failed", "stale_ref"]
+    },
+    {
+      "name": "wpm_screenshot",
+      "action": "screenshot",
+      "engine": "Invoke-WpmAction -Action screenshot",
+      "description": "Capture the target's screen rectangle to a PNG on disk and return the COORDINATE MAPPING as data: screenRect, imageSize, scale, identity, frame and dpiAware. The image is not returned inline (a plugin cannot mint an inline image block without the host's attachment service); write it to disk and read it with the host's image reader. The point of this action is not the picture -- it is that the caller never has to multiply a scale factor itself: hand the image coordinates straight back to click with space:'image' and the engine does the conversion, then still asserts that the point belongs to the target.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hwnd": { "type": "string", "description": "Target top-level window handle from wpm_windows. Required unless fullScreen is true." },
+          "fullScreen": { "type": "boolean", "default": false, "description": "Capture the whole virtual screen instead of one window. Off by default on purpose: silently capturing the owner's entire desktop is exactly the kind of quiet overreach this product refuses elsewhere." },
+          "maxWidth": { "type": "integer", "minimum": 0, "maximum": 7680, "default": 0, "description": "Downscale the saved image to at most this width. 0 (default) means scale=1 and identity=true -- no silent resampling, because a resized image is a CHANGED coordinate system and this action exists to make coordinates honest." }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "refusals": ["no_hwnd", "paused"]
+    },
+    {
+      "name": "wpm_preview",
+      "action": "preview",
+      "engine": "Invoke-WpmAction -Action preview",
+      "description": "Show the owner where a click WOULD land, without clicking: draw the AI marker at the point (when the overlay is up) and report, as text, which element sits under it (name, control type, automation id, rect). This turns an irreversible click into a reviewable one, and it makes confirmation independent of vision -- the answer is what the OS says is at that point, not a guess from a picture. Silent by construction: it writes no input queue entry, takes no focus, and produces no proof window. Use it before a destructive click, or as the confirmation step after reading a snapshot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hwnd": { "type": "string", "description": "Target top-level window handle from wpm_windows." },
+          "x": { "type": "integer", "description": "Screen X coordinate to preview. Must belong to the target window, otherwise the call is refused instead of reporting an element from another application." },
+          "y": { "type": "integer", "description": "Screen Y coordinate to preview." }
+        },
+        "required": ["hwnd", "x", "y"],
+        "additionalProperties": false
+      },
+      "refusals": ["no_hwnd", "paused", "unreachable"]
     }
   ],
   "refusalCases": [
@@ -149,6 +215,46 @@
       "args": { "hwnd": "$deadHwnd", "x": 100, "y": 100 },
       "expect": "no_hwnd",
       "note": "A handle that does not identify a live window. Measured, no window is touched."
+    },
+    {
+      "id": "click-stale-shot",
+      "mode": "engine",
+      "tool": "wpm_click",
+      "args": { "hwnd": "$liveHwnd", "x": 100, "y": 100, "space": "image", "shotId": "wpm-shot-0000-nonexistent" },
+      "expect": "stale_ref",
+      "note": "space:'image' names a shotId the engine never issued. The engine refuses instead of reinterpreting the image pixels as screen pixels -- substituting the raw numbers would click somewhere plausibly wrong, which is the failure class this code exists for. Measured: the call never reaches the door probe."
+    },
+    {
+      "id": "preview-outside-target",
+      "mode": "engine",
+      "tool": "wpm_preview",
+      "args": { "hwnd": "$winformsHwnd", "x": 2, "y": 2 },
+      "expect": "unreachable",
+      "note": "The refusal-test target is placed at 60,60, so (2,2) is outside it. A preview point that belongs to another window must be refused, not answered with that window's element: reporting 'you would click the desktop' and drawing the marker there would make the preview the one place this product guesses about a point it was not given. This is also the executable instance of `unreachable` (the two named-element-miss cases cannot run on this host: the WinForms positive control currently surfaces its controls as bare Panes through the legacy MSAA bridge, see findings.md)."
+    },
+    {
+      "id": "snapshot-dead-hwnd",
+      "mode": "engine",
+      "tool": "wpm_snapshot",
+      "args": { "hwnd": "$deadHwnd" },
+      "expect": "no_hwnd",
+      "note": "A snapshot needs a live window: there is no tree to number. Same handle as the click case, and zero elements/patterns are touched."
+    },
+    {
+      "id": "screenshot-dead-hwnd",
+      "mode": "engine",
+      "tool": "wpm_screenshot",
+      "args": { "hwnd": "$deadHwnd" },
+      "expect": "no_hwnd",
+      "note": "Same reason as snapshot. fullScreen:true is the only path that does not need a window, and this case does not pass it."
+    },
+    {
+      "id": "preview-dead-hwnd",
+      "mode": "engine",
+      "tool": "wpm_preview",
+      "args": { "hwnd": "$deadHwnd", "x": 100, "y": 100 },
+      "expect": "no_hwnd",
+      "note": "A preview point that belongs to no named window has nothing to report and nothing to draw, so it refuses rather than looking up whatever application happens to own that pixel."
     },
     {
       "id": "click-while-paused",

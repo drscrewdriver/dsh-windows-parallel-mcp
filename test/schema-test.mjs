@@ -1,7 +1,7 @@
 // schema-test.mjs — the action contract, checked as a contract rather than as a file that exists.
 //
 // WHY THIS IS A TEST AND NOT REVIEW. src/schema/tools.json is the surface a model branches on:
-// five tools, their arguments, and the refusal codes each can return. Four classes of mistake in
+// eight tools, their arguments, and the refusal codes each can return. Four classes of mistake in
 // it are invisible until an agent is already confused at runtime:
 //   * a required field that is not declared in properties (the model cannot know the type);
 //   * an argument accepted by a case but rejected by the schema (the documented example is wrong);
@@ -54,10 +54,10 @@ function validate(sch, value, path) {
 // --- the contract's own shape ---------------------------------------------------------------
 if (!schema.stance || !schema.stance.inputQueue || !schema.stance.cursor) fail('schema.stance must state what the engine does not do');
 
-const EXPECTED = ['wpm_windows', 'wpm_click', 'wpm_type', 'wpm_focus', 'wpm_status'];
+const EXPECTED = ['wpm_windows', 'wpm_click', 'wpm_type', 'wpm_focus', 'wpm_status', 'wpm_snapshot', 'wpm_screenshot', 'wpm_preview'];
 const names = schema.tools.map((t) => t.name);
 for (const n of EXPECTED) if (!names.includes(n)) fail(`missing tool '${n}'`);
-for (const n of names) if (!EXPECTED.includes(n)) fail(`unexpected tool '${n}' (the surface is fixed at five; adding one is a contract change)`);
+for (const n of names) if (!EXPECTED.includes(n)) fail(`unexpected tool '${n}' (the surface is fixed at eight; adding one is a contract change)`);
 if (new Set(names).size !== names.length) fail('duplicate tool name');
 
 for (const tool of schema.tools) {
@@ -83,7 +83,7 @@ for (const tool of schema.tools) {
 
 // --- the host projection agrees with the registered parameters ------------------------------
 // The form is decided (A: DSH native plugin, spec.md R3.1'). That makes the projection part of the
-// contract rather than a private detail: the five named actions are what the docs promise, the one
+// contract rather than a private detail: the eight named actions are what the docs promise, the one
 // registered tool is what the model actually gets, and the two must describe the same capability.
 {
   const proj = schema.hostProjection;

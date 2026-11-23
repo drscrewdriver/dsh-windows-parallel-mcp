@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> 0.5.0 rende il «frame» leggibile dal chiamante e toglie il calcolo delle coordinate dalle mani del modello: tre azioni di sola lettura (`snapshot` come tabella numerata di elementi, `screenshot` che restituisce la mappatura, `preview` che riporta in testo l'elemento sotto un punto), indirizzamento `label` risolto sull'elemento tramite RuntimeId, `space:"image"` convertito dal motore, e un quattordicesimo codice di rifiuto `stale_ref`. L'invariante previsto «ogni rect di elemento è contenuto in screenRect» è stato smentito dalla misura (sconfinamenti di 3/18/287/2720px; un rect è una coordinata schermo assoluta, indipendente dal frame): sostituito dall'esclusione conteggiata degli elementi fuori cattura, da un controllo incrociato tra frame e rect dichiarato dall'albero (frameCheck/frameInset) e da un gate strutturale della fonte unica. Gate 17→19, due suite oracle indipendenti. Dettagli nella voce inglese.Due ulteriori correzioni: `uia_tree_empty` non viene più riportato per finestre che hanno una porta ma l'hanno soppressa con `elementName` (WinForms ora risponde `unreachable`), e l'asserzione di deriva del cursore che rendeva il gate rosso a intermittenza ora esclude il movimento del proprietario via `GetLastInputInfo` (SKIP con age/finestra se arriva un input; il read-back esatto del motore resta un'asserzione rigida).
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).

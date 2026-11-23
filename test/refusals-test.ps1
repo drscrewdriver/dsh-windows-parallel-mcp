@@ -94,6 +94,12 @@ function New-CaseFacts([object]$factsSpec) {
     messageDoor = 'MessageDoor'; hasPattern = 'HasPattern'; patternKind = 'PatternKind'
     action = 'Action'; factsMeasured = 'FactsMeasured'
     uiaTreeEmpty = 'UiaTreeEmpty'; uiaProbeFailed = 'UiaProbeFailed'
+    # R3's takeover facts were added to the CONSTRUCTOR and to tools.json's decision cases but not to
+    # this map, so the three takeover/keyinject decision cases threw 'unknown facts field' instead of
+    # running -- a runner bug that made three documented refusals unexercised while the schema said
+    # otherwise. Found on 2026-11-23 by running the suite at HEAD, where it was already red.
+    takeoverRequested = 'TakeoverRequested'; keyInjectRequested = 'KeyInjectRequested'
+    keyInjectAllowed = 'KeyInjectAllowed'; hudReady = 'HudReady'; foregroundIsTarget = 'ForegroundIsTarget'
   }
   $splat = @{}
   foreach ($k in $factsSpec.PSObject.Properties.Name) {
@@ -126,11 +132,28 @@ function Invoke-Case([object]$case) {
         if ($paused) { Set-WpmPaused $true 'refusals-test' }
         $common = @{ Hwnd = $hwnd }
         if ($tool -eq 'wpm_click') {
-          $r = Invoke-WpmAction @common -Action click -X ([int](Get-CaseArg $ca 'x')) -Y ([int](Get-CaseArg $ca 'y'))
+          # `space`/`shotId`/`label`/`snapId` travel into the engine since 0.5.0: the stale_ref case is
+          # exactly "space:'image' with a shotId that was never issued", so the runner has to forward it
+          # or the case would test a different call than the one the schema documents. An absent space
+          # must be 'screen' rather than '': [ValidateSet] REJECTS an empty string, which would have
+          # turned every non-image click case into a binding error instead of a refusal.
+          $sp = [string](Get-CaseArg $ca 'space')
+          if (-not $sp) { $sp = 'screen' }
+          $r = Invoke-WpmAction @common -Action click -X ([int](Get-CaseArg $ca 'x')) -Y ([int](Get-CaseArg $ca 'y')) `
+            -Space $sp -ShotId ([string](Get-CaseArg $ca 'shotId')) `
+            -Label ([int](Get-CaseArg $ca 'label')) -SnapId ([string](Get-CaseArg $ca 'snapId'))
         } elseif ($tool -eq 'wpm_type') {
-          $r = Invoke-WpmAction @common -Action type -Text ([string](Get-CaseArg $ca 'text')) -ElementName ([string](Get-CaseArg $ca 'elementName'))
+          $r = Invoke-WpmAction @common -Action type -Text ([string](Get-CaseArg $ca 'text')) -ElementName ([string](Get-CaseArg $ca 'elementName')) `
+            -Label ([int](Get-CaseArg $ca 'label')) -SnapId ([string](Get-CaseArg $ca 'snapId'))
         } elseif ($tool -eq 'wpm_focus') {
-          $r = Invoke-WpmAction @common -Action focus -ElementName ([string](Get-CaseArg $ca 'elementName'))
+          $r = Invoke-WpmAction @common -Action focus -ElementName ([string](Get-CaseArg $ca 'elementName')) `
+            -Label ([int](Get-CaseArg $ca 'label')) -SnapId ([string](Get-CaseArg $ca 'snapId'))
+        } elseif ($tool -eq 'wpm_snapshot') {
+          $r = Invoke-WpmAction @common -Action snapshot
+        } elseif ($tool -eq 'wpm_screenshot') {
+          $r = Invoke-WpmAction @common -Action screenshot -FullScreen ([bool](Get-CaseArg $ca 'fullScreen'))
+        } elseif ($tool -eq 'wpm_preview') {
+          $r = Invoke-WpmAction @common -Action preview -X ([int](Get-CaseArg $ca 'x')) -Y ([int](Get-CaseArg $ca 'y'))
         } elseif ($tool -eq 'wpm_status') {
           $r = Invoke-WpmAction @common -Action status
         } else {

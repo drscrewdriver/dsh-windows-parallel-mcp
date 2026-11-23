@@ -346,6 +346,43 @@ public static class WpmWin
         SendMessageStrW(child, 0x000C, IntPtr.Zero, text);
         return "settext|" + text.Length;
     }
+
+    // ---- 0.5.0: the frame, the virtual screen, and the capture footprint ---------------------
+    // THE FRAME COMES FROM DWM, NOT FROM GetWindowRect. Measured on this desktop (2026-11-23):
+    // GetWindowRect returns -8,-8,1928,1040 while DwmGetWindowAttribute(EXTENDED_FRAME_BOUNDS)
+    // returns 0,0,1920,1032 -- four 8px differences that are the invisible resize shadow. The UIA
+    // tree MIXES the two spaces (the ROOT element reports the shadow-inclusive rect, its children the
+    // real one), so any arithmetic that mixes them is 8px wrong and looks right. `screenRect` is
+    // therefore DWM-only, and the fallback is REPORTED as frame='win32' rather than hidden: an 8px
+    // offset with no field to explain it is the failure mode this whole change is written against.
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int i);
+
+    /// <summary>{hr, left, top, right, bottom}. hr==0 means the DWM answer is usable.</summary>
+    public static long[] DwmFrame(IntPtr h)
+    {
+        RECT r;
+        int hr = DwmGetWindowAttribute(h, 9 /* DWMWA_EXTENDED_FRAME_BOUNDS */, out r, Marshal.SizeOf(typeof(RECT)));
+        if (hr != 0) return new long[] { hr, 0, 0, 0, 0 };
+        return new long[] { 0, r.Left, r.Top, r.Right, r.Bottom };
+    }
+
+    /// <summary>{ok, left, top, right, bottom} from GetWindowRect -- the documented FALLBACK only.</summary>
+    public static long[] WinRect(IntPtr h)
+    {
+        RECT r;
+        if (!GetWindowRect(h, out r)) return new long[] { 0, 0, 0, 0, 0 };
+        return new long[] { 1, r.Left, r.Top, r.Right, r.Bottom };
+    }
+
+    /// <summary>{x, y, width, height} of the virtual screen (all monitors, physical pixels).</summary>
+    public static int[] VirtualScreen()
+    {
+        const int SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77;
+        const int SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79;
+        return new int[] { GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+                           GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+    }
 }
 '@
 }
@@ -405,6 +442,14 @@ public static class WpmCtl {
 $script:WpmDpiAware = [WpmWin]::EnsureDpiAware()
 
 $script:WpmUia = $null
+# ---- 0.5.0 state. Deliberately IN-PROCESS and BOUNDED: a label is only meaningful in the frame that
+# printed it, so this holds at most two snapshots (the newest for label references, the previous as a
+# sinceSnapId diff base) and at most shotsKeep screenshots. A worker restart empties both, which is
+# exactly what makes a stale id a real, reportable condition instead of an unbounded cache.
+$script:WpmSnapshots = @()
+$script:WpmShots = @{}
+$script:WpmSnapSeq = 0
+$script:WpmShotSeq = 0
 function Get-WpmUiaCached {
   # Each pattern type is resolved independently and a missing one is simply absent from the table.
   # The first version built the table in one literal, and on this runtime
@@ -697,7 +742,20 @@ function Get-WpmFacts {
   # They get different refusal codes (decide.ps1), so this measurement runs only when the probe
   # actually ran -- never to decorate a target whose message door already decided the route.
   $uiaTreeEmpty = $false
-  if (-not $hasPattern -and ($pointResolved -or $scanProbed)) {
+  # THE DIAGNOSIS ONLY APPLIES TO A WINDOW THAT HAS NO OTHER DOOR. This condition used to be just
+  # "the probe ran and found no pattern", which mislabels a whole class of target: name an element on a
+  # WinForms window and `engine.ps1` suppresses its message door (a window message cannot address "the
+  # control called X"), the UIA scan then finds nothing drivable, and the engine reported
+  # `uia_tree_empty` -- "the application has accessibility switched off, relaunch it with
+  # --force-renderer-accessibility". That advice is not merely useless for WinForms, it is WRONG about
+  # the cause: the window demonstrably has a real door, we shut it ourselves. Measured 2026-11-23: the
+  # WinForms positive control walks to three Panes carrying the controls' own names and automation ids
+  # through the MSAA bridge (content=0, so `Test-WpmUiaTreeHasContent` says "no content"), while the
+  # genuine a11y-off sample (uTools) and a bare desktop shell have the same shape -- so the tree alone
+  # cannot separate them. The door CAN: a target we measured a door on must not be diagnosed as
+  # accessibilty-off, whatever its tree looks like. Doors present => the honest code is `unreachable`
+  # ("nothing addressable at that name"), which points at a next step that exists.
+  if (-not $hasPattern -and ($pointResolved -or $scanProbed) -and ($doorKinds.Count -eq 0)) {
     $uiaTreeEmpty = -not (Test-WpmUiaTreeHasContent $Hwnd)
   }
 
@@ -801,4 +859,533 @@ function Restore-WpmFocus {
     }
   }
   return $res
+}
+
+# ==================================================================================================
+# 0.5.0 READ PATHS: a frame the model can read, a picture whose coordinates are DATA, and a preview
+# that answers in text. None of the three writes an input-queue entry or takes the focus.
+# ==================================================================================================
+
+function Get-WpmDataDir {
+  # The same base the takeover latch uses (takeover.ps1 Get-WpmTakeoverLatchPath) and the host half
+  # (lib/index.js abortLatchPath). One directory to open when something has to be inspected by hand.
+  $base = $env:LOCALAPPDATA
+  if (-not $base) { $base = [System.IO.Path]::GetTempPath() }
+  return (Join-Path $base 'wpm')
+}
+
+function Get-WpmShotsDir {
+  $d = Join-Path (Get-WpmDataDir) 'shots'
+  if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+  return $d
+}
+
+function Get-WpmFrameRect {
+  <#
+    ONE frame rule, and the caller cannot silently get the wrong one.
+    Returns @{ ok; frame='dwm'|'win32'|'none'; hr; left; top; right; bottom }.
+    DWM(9 EXTENDED_FRAME_BOUNDS) is the ONLY source that agrees with the UIA children's coordinate
+    space; GetWindowRect is the documented fallback for RDP/Basic-theme hosts where the DWM call
+    returns a non-zero hr. Which one was used is a RETURNED FIELD, never a silent substitution.
+  #>
+  param([IntPtr]$Hwnd)
+  $d = [WpmWin]::DwmFrame($Hwnd)
+  if ($d[0] -eq 0 -and $d[3] -gt $d[1] -and $d[4] -gt $d[2]) {
+    return @{ ok = $true; frame = 'dwm'; hr = 0
+      left = [int]$d[1]; top = [int]$d[2]; right = [int]$d[3]; bottom = [int]$d[4] }
+  }
+  $w = [WpmWin]::WinRect($Hwnd)
+  if ($w[0] -eq 1 -and $w[3] -gt $w[1] -and $w[4] -gt $w[2]) {
+    return @{ ok = $true; frame = 'win32'; hr = [int]$d[0]
+      left = [int]$w[1]; top = [int]$w[2]; right = [int]$w[3]; bottom = [int]$w[4] }
+  }
+  return @{ ok = $false; frame = 'none'; hr = [int]$d[0]; left = 0; top = 0; right = 0; bottom = 0 }
+}
+
+function Test-WpmFrameInsideRoot {
+  <#
+    The DECIDABLE frame check. "Every element rect is inside screenRect" was measured to be FALSE on
+    real windows -- Chromium/Electron trees report virtualized content far outside the viewport
+    (overhangs of 3px, 18px, 287px and 2720px measured here on 2026-11-23), so that rule refuses
+    ordinary windows. What holds is narrower and still worth asserting: the frame we CAPTURED must lie
+    inside the window's own rect as the accessibility tree reports it (the ROOT element's
+    BoundingRectangle, which measures equal to GetWindowRect -- the shadow space). Measured insets on 8
+    real windows: exactly 0,0,0,0 (borderless) or 8,8,8,8 (shadowed). A frame that pokes OUTSIDE the
+    root means the frame came from somewhere else, and refusing there is what keeps a wrong frame from
+    ever becoming a label.
+  #>
+  param([hashtable]$Frame, [hashtable]$RootRect, [int]$Tolerance = 2)
+  $insetL = [int]$Frame.left - [int]$RootRect.left
+  $insetT = [int]$Frame.top - [int]$RootRect.top
+  $insetR = [int]$RootRect.right - [int]$Frame.right
+  $insetB = [int]$RootRect.bottom - [int]$Frame.bottom
+  $ok = ($insetL -ge -$Tolerance) -and ($insetT -ge -$Tolerance) -and
+        ($insetR -ge -$Tolerance) -and ($insetB -ge -$Tolerance)
+  return @{ ok = $ok; insetLeft = $insetL; insetTop = $insetT; insetRight = $insetR; insetBottom = $insetB }
+}
+
+function Get-WpmSnapshotTree {
+  <#
+    Walk the tree ONCE (FindAll(Descendants) + IsOffscreen), number what is visible, and hand back a
+    frame the model can answer with. Measured: 816 descendants / 71 visible / 291ms on an Electron
+    window, so TreeWalker (one cross-process COM round trip per node) is the wrong tool here and the
+    300-element cap is deliberately loose.
+
+    '0 element(s)' is a REAL answer on this desktop (Clash, Everything measured 0) and is reported as
+    such; it deliberately does NOT reuse uia_tree_empty, whose meaning is "UI Automation is switched
+    off in the application" and whose next step is relaunching the app.
+
+    `interactableOnly` (default on) is the zero-cost first pass at a huge tree. `sinceSnapId` returns
+    added/removed/changed instead of re-describing an unchanged table -- the measured cost of a
+    multi-step flow is repeating the parts that did not move.
+  #>
+  param(
+    [IntPtr]$Hwnd,
+    [int]$MaxElements = 300,
+    [bool]$InteractableOnly = $true,
+    [string]$Intent = '',
+    [string]$SinceSnapId = ''
+  )
+  $cap = [Math]::Max(1, [Math]::Min(5000, $MaxElements))
+
+  # The diff base is resolved BEFORE the walk: an unknown sinceSnapId is a stale reference, not an
+  # empty diff. Returning "no changes" for an id we never issued would be the most comfortable lie here.
+  $base = $null
+  if ($SinceSnapId) {
+    foreach ($s in @($script:WpmSnapshots)) {
+      if ($s -and $s.snapId -eq $SinceSnapId) { $base = $s; break }
+    }
+    if (-not $base) {
+      return @{ ok = $false; stale = $true
+        reason = "sinceSnapId '$SinceSnapId' is not a snapshot this worker still holds (it keeps the newest as a label base and the one before it as a diff base); take a new snapshot and diff against that id" }
+    }
+  }
+
+  $frame = Get-WpmFrameRect $Hwnd
+  if (-not $frame.ok) {
+    return @{ ok = $false; stale = $false; frameCheck = 'unknown'
+      reason = "no usable window frame: DwmGetWindowAttribute hr=$($frame.hr) and GetWindowRect both failed, so there is no rectangle to measure elements against" }
+  }
+
+  $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+
+  # ---- THE DECIDABLE SELF-CHECK ------------------------------------------------------------------
+  # The obvious invariant -- "every element rect is contained in screenRect" -- was MEASURED to be
+  # false on real windows and is therefore NOT used: Chromium/Electron trees legitimately report
+  # virtualized content far outside the viewport (overhangs measured 3px, 18px, 287px and 2720px on
+  # this desktop, 2026-11-23), and a rule that refuses those snapshots refuses whole classes of
+  # ordinary windows. What IS decidable and cheap is the relationship the two coordinate sources
+  # state about the window itself: the ROOT element's rect (the tree's own claim, which measures equal
+  # to GetWindowRect -- shadow space) must CONTAIN the frame we captured. Measured on 8 real windows:
+  # it holds with insets of exactly 0px (borderless) or 8px/8px/8px/8px (shadowed), and a frame that
+  # pokes outside the root means the frame came from somewhere else. The inset is REPORTED as data so
+  # the shadow is visible instead of merely survived.
+  $frameCheck = 'unknown'
+  $insetL = 0; $insetT = 0; $insetR = 0; $insetB = 0
+  try {
+    $rb = $root.Current.BoundingRectangle
+    $rootRect = @{
+      left = [int][Math]::Round($rb.Left); top = [int][Math]::Round($rb.Top)
+      right = [int][Math]::Round($rb.Right); bottom = [int][Math]::Round($rb.Bottom)
+    }
+    $inside = Test-WpmFrameInsideRoot -Frame $frame -RootRect $rootRect
+    $insetL = [int]$inside.insetLeft; $insetT = [int]$inside.insetTop
+    $insetR = [int]$inside.insetRight; $insetB = [int]$inside.insetBottom
+    $frameCheck = if ($inside.ok) { 'pass' } else { 'fail' }
+    if ($frameCheck -eq 'fail') {
+      return @{ ok = $false; stale = $false; frame = $frame.frame; frameCheck = 'fail'
+        reason = "frame self-check failed: the captured frame ($($frame.left),$($frame.top),$($frame.right),$($frame.bottom), source=$($frame.frame)) is not contained in the window's own rect ($($rootRect.left),$($rootRect.top),$($rootRect.right),$($rootRect.bottom)) that the accessibility tree reports. The two sources disagree about where this window is, so no label from this snapshot is safe to act on. Re-read action=windows and compare rect= with this frame" }
+    }
+  } catch {
+    # An unreadable root rect cannot certify anything, and it must not be turned into a failure: the
+    # snapshot itself may still be useful, so the check reports 'unknown' rather than 'pass'.
+    $frameCheck = 'unknown'
+  }
+
+  $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.Condition]::TrueCondition)
+  $total = $all.Count
+  $pats = Get-WpmUiaCached
+  $order = @('invoke', 'value', 'toggle', 'select', 'legacy')
+  $rows = @()
+  $truncated = $false
+  $outsideFrame = 0
+
+  for ($i = 0; $i -lt $total; $i++) {
+    $el = $all[$i]
+    $off = $false
+    try { $off = [bool]$el.Current.IsOffscreen } catch { continue }
+    if ($off) { continue }
+
+    $ct = ''; $nm = ''; $aid = ''
+    try { $ct = ([string]$el.Current.ControlType.ProgrammaticName) -replace '^ControlType\.', '' } catch { continue }
+    try { $nm = [string]$el.Current.Name } catch { }
+    try { $aid = [string]$el.Current.AutomationId } catch { }
+
+    # Sub-element rects are in the DWM/real space (measured); the ROOT element is the one that reports
+    # the shadow-inclusive rect, and FindAll(Descendants) never returns the root -- so nothing here
+    # mixes the two spaces.
+    $rc = @{ left = 0; top = 0; right = 0; bottom = 0 }
+    try {
+      $b = $el.Current.BoundingRectangle
+      $rc = @{
+        left = [int][Math]::Round($b.Left); top = [int][Math]::Round($b.Top)
+        right = [int][Math]::Round($b.Right); bottom = [int][Math]::Round($b.Bottom)
+      }
+    } catch { }
+
+    # A label exists to be POINTED AT inside the capture. An element with no overlap with the frame
+    # cannot be clicked within it (the point-ownership assertion would refuse), so handing out a
+    # number for it would hand out a trap. It is excluded and COUNTED, never silently dropped.
+    $overlaps = ($rc.right -gt $frame.left) -and ($rc.left -lt $frame.right) -and
+                ($rc.bottom -gt $frame.top) -and ($rc.top -lt $frame.bottom)
+    if (-not $overlaps) { $outsideFrame++; continue }
+
+    $kinds = @()
+    foreach ($k in $order) {
+      if (-not $pats.ContainsKey($k)) { continue }
+      $obj = $null
+      try { if ($el.TryGetCurrentPattern($pats[$k], [ref]$obj)) { } } catch { continue }
+      if ($obj) { $kinds += $k }
+    }
+    if ($InteractableOnly -and $kinds.Count -eq 0) { continue }
+
+    if ($rows.Count -ge $cap) { $truncated = $true; break }
+
+    $rid = ''
+    try { $rid = (@($el.GetRuntimeId()) -join '.') } catch { $rid = '' }
+
+    $rows += @{
+      label = ($rows.Count + 1)
+      controlType = $ct
+      name = $nm
+      automationId = $aid
+      runtimeId = $rid
+      rect = $rc
+      patterns = @($kinds)
+    }
+  }
+
+  # ---- the delta, by UIA RuntimeId (measured stable across queries, 71/71) --------------------
+  $delta = $null
+  if ($base) {
+    $oldByRid = @{}
+    foreach ($r in @($base.elements)) { if ($r.runtimeId) { $oldByRid[$r.runtimeId] = $r } }
+    $newByRid = @{}
+    foreach ($r in $rows) { if ($r.runtimeId) { $newByRid[$r.runtimeId] = $r } }
+    $added = @(); $removed = @(); $changed = @(); $same = 0
+    foreach ($r in $rows) {
+      if (-not $r.runtimeId) { continue }
+      if (-not $oldByRid.ContainsKey($r.runtimeId)) { $added += $r; continue }
+      $o = $oldByRid[$r.runtimeId]
+      $why = @()
+      if ([string]$o.name -ne [string]$r.name) { $why += 'name' }
+      if ([string]$o.controlType -ne [string]$r.controlType) { $why += 'controlType' }
+      if ([string]$o.automationId -ne [string]$r.automationId) { $why += 'automationId' }
+      if (([int]$o.rect.left -ne [int]$r.rect.left) -or ([int]$o.rect.top -ne [int]$r.rect.top) -or
+          ([int]$o.rect.right -ne [int]$r.rect.right) -or ([int]$o.rect.bottom -ne [int]$r.rect.bottom)) { $why += 'rect' }
+      if ((@($o.patterns) -join ',') -ne (@($r.patterns) -join ',')) { $why += 'patterns' }
+      if ($why.Count -gt 0) {
+        $changed += @{ label = $r.label; controlType = $r.controlType; name = $r.name
+          automationId = $r.automationId; rect = $r.rect; patterns = @($r.patterns); changed = $why }
+      } else { $same++ }
+    }
+    foreach ($o in @($base.elements)) {
+      if (-not $o.runtimeId) { continue }
+      if (-not $newByRid.ContainsKey($o.runtimeId)) {
+        $removed += @{ label = $o.label; controlType = $o.controlType; name = $o.name
+          automationId = $o.automationId; rect = $o.rect; patterns = @($o.patterns) }
+      }
+    }
+    $delta = @{ sinceSnapId = $base.snapId; added = @($added); removed = @($removed)
+      changed = @($changed); unchanged = $same }
+  }
+
+  $script:WpmSnapSeq = $script:WpmSnapSeq + 1
+  $snapId = 'snap-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + '-' + $script:WpmSnapSeq
+  $entry = @{
+    snapId = $snapId
+    hwnd = $Hwnd.ToInt64().ToString()
+    frame = $frame.frame
+    frameCheck = $frameCheck
+    frameInset = @{ left = $insetL; top = $insetT; right = $insetR; bottom = $insetB }
+    intent = $Intent
+    createdAtUtcMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    total = $total
+    count = $rows.Count
+    outsideFrame = $outsideFrame
+    truncated = $truncated
+    elements = @($rows)
+  }
+  # Newest first. Capacity 2, for one reason each: [0] resolves LABEL references, [1] is the only
+  # valid sinceSnapId. Dropping the older one is what makes a superseded snapId a reportable
+  # stale_ref instead of a silent success against a frame the caller can no longer see.
+  $prev = @($script:WpmSnapshots)
+  $script:WpmSnapshots = @($entry) + @($prev | Select-Object -First 1)
+
+  # The intent travels WITH the frame as a file too, so a deciding subagent (or a human reading the
+  # directory afterwards) gets "what this frame was for" without the conversation around it. One file,
+  # overwritten each snapshot: bounded by construction.
+  try {
+    $dataDir = Get-WpmDataDir
+    if (-not (Test-Path -LiteralPath $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
+    $payload = $entry | ConvertTo-Json -Depth 8 -Compress
+    [System.IO.File]::WriteAllText((Join-Path $dataDir 'last-snapshot.json'), $payload,
+      (New-Object System.Text.UTF8Encoding($false)))
+  } catch { }
+
+  return @{ ok = $true; stale = $false; snapId = $snapId; frame = $frame.frame; frameCheck = $frameCheck
+    frameInset = @{ left = $insetL; top = $insetT; right = $insetR; bottom = $insetB }
+    intent = $Intent; total = $total; count = $rows.Count; outsideFrame = $outsideFrame
+    truncated = $truncated; elements = @($rows); delta = $delta }
+}
+
+function Resolve-WpmSnapshotLabel {
+  <#
+    Resolve a snapshot LABEL back to the ELEMENT (by UIA RuntimeId), so a labelled action keeps the
+    silent UIA-pattern path and never degrades into a coordinate click. Every failure to resolve is a
+    stale reference, not a guess: the frame the caller read is gone.
+  #>
+  param([IntPtr]$Hwnd, [int]$Label, [string]$SnapId)
+  $snap = $null
+  $all = @($script:WpmSnapshots)
+  if ($all.Count -gt 0) { $snap = $all[0] }
+  if (-not $snap) {
+    return @{ ok = $false; stale = $true; reason = 'no snapshot has been taken by this worker; take one and act on its labels' }
+  }
+  if ($SnapId -and $SnapId -ne $snap.snapId) {
+    return @{ ok = $false; stale = $true
+      reason = "snapId '$SnapId' was superseded by '$($snap.snapId)'; a label only means something inside the frame that printed it, so take a new snapshot" }
+  }
+  if ([string]$snap.hwnd -ne $Hwnd.ToInt64().ToString()) {
+    return @{ ok = $false; stale = $true
+      reason = "the newest snapshot is of hwnd=$($snap.hwnd), not this target; take a snapshot of this window" }
+  }
+  $row = $null
+  foreach ($r in @($snap.elements)) { if ([int]$r.label -eq $Label) { $row = $r; break } }
+  if (-not $row) {
+    return @{ ok = $false; stale = $true
+      reason = "label $Label is not in snapshot $($snap.snapId) (it printed $($snap.count) element(s))" }
+  }
+  if (-not $row.runtimeId) {
+    return @{ ok = $false; stale = $true
+      reason = "label $Label carried no stable runtime id, so it cannot be re-found; take a new snapshot" }
+  }
+  $el = $null
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    $found = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition)
+    for ($i = 0; $i -lt $found.Count; $i++) {
+      $cand = $found[$i]
+      $rid = ''
+      try { $rid = (@($cand.GetRuntimeId()) -join '.') } catch { continue }
+      if ($rid -eq $row.runtimeId) { $el = $cand; break }
+    }
+  } catch {
+    return @{ ok = $false; stale = $true; reason = 'the tree could not be re-walked: ' + $_.Exception.Message }
+  }
+  if (-not $el) {
+    return @{ ok = $false; stale = $true
+      reason = "the element behind label $Label is no longer in the tree; take a new snapshot" }
+  }
+  $pats = Get-WpmUiaCached
+  $kind = 'none'
+  foreach ($k in @('invoke', 'value', 'toggle', 'select', 'legacy')) {
+    if (-not $pats.ContainsKey($k)) { continue }
+    $obj = $null
+    try { if ($el.TryGetCurrentPattern($pats[$k], [ref]$obj)) { } } catch { continue }
+    if ($obj) { $kind = $k; break }
+  }
+  if ($kind -eq 'none') {
+    return @{ ok = $false; stale = $true
+      reason = "the element behind label $Label no longer exposes a usable UIA pattern; take a new snapshot" }
+  }
+  return @{ ok = $true; stale = $false; element = $el; patternKind = $kind; row = $row; snapId = $snap.snapId }
+}
+
+function Get-WpmScreenshot {
+  <#
+    CopyFromScreen over the DWM frame (or the virtual screen on explicit request) and return the
+    MAPPING as data. Why the picture is not returned inline: a plugin cannot mint an inline image
+    block without the host's attachment service (measured: ImageBlock needs an ImageAttachmentRef from
+    an app.asar-only package), so the file is written and the caller reads it. What this action is
+    really for is the second half: `scale`/`identity`/`screenRect` let a caller hand IMAGE coordinates
+    back to click space:'image' and never multiply anything itself.
+
+    scale = imagePixels / screenPixels. identity is true only when scale==1.0. Nothing is resampled
+    unless maxWidth asked for it, because a resized image IS a different coordinate system.
+  #>
+  param([IntPtr]$Hwnd, [bool]$FullScreen = $false, [int]$MaxWidth = 0, [int]$Keep = 10)
+  Add-Type -AssemblyName System.Drawing
+
+  if ($FullScreen) {
+    $vs = [WpmWin]::VirtualScreen()
+    $frame = @{ ok = $true; frame = 'dwm'; hr = 0
+      left = [int]$vs[0]; top = [int]$vs[1]; right = ([int]$vs[0] + [int]$vs[2]); bottom = ([int]$vs[1] + [int]$vs[3]) }
+  } else {
+    $frame = Get-WpmFrameRect $Hwnd
+    if (-not $frame.ok) {
+      return @{ ok = $false
+        reason = "no usable window frame: DwmGetWindowAttribute hr=$($frame.hr) and GetWindowRect both failed" }
+    }
+  }
+
+  $w = $frame.right - $frame.left
+  $h = $frame.bottom - $frame.top
+  if ($w -le 0 -or $h -le 0) { return @{ ok = $false; reason = "the captured rectangle is empty ($($w)x$($h))" } }
+
+  $bmp = $null
+  $resized = $null
+  try {
+    $bmp = New-Object System.Drawing.Bitmap($w, $h)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    try { $g.CopyFromScreen($frame.left, $frame.top, 0, 0, (New-Object System.Drawing.Size($w, $h))) }
+    finally { $g.Dispose() }
+
+    $scale = 1.0
+    $imgW = $w
+    $imgH = $h
+    $out = $bmp
+    $cap = [Math]::Max(0, [Math]::Min(7680, $MaxWidth))
+    if ($cap -gt 0 -and $w -gt $cap) {
+      $imgW = $cap
+      $imgH = [int][Math]::Max(1, [Math]::Round($h * ($cap / [double]$w)))
+      $resized = New-Object System.Drawing.Bitmap($imgW, $imgH)
+      $g2 = [System.Drawing.Graphics]::FromImage($resized)
+      try {
+        $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g2.DrawImage($bmp, 0, 0, $imgW, $imgH)
+      } finally { $g2.Dispose() }
+      $out = $resized
+      $scale = [Math]::Round($imgW / [double]$w, 6)
+    }
+
+    $dir = Get-WpmShotsDir
+    $script:WpmShotSeq = $script:WpmShotSeq + 1
+    $shotId = 'shot-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + '-' + $script:WpmShotSeq
+    $file = Join-Path $dir ($shotId + '.png')
+    $out.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bytes = (Get-Item -LiteralPath $file).Length
+    $keepN = [Math]::Max(1, [Math]::Min(200, $Keep))
+
+    # Retention: newest `shotsKeep` survive, older PNGs in THIS directory are deleted. The registry is
+    # pruned against the same list, so a shotId that was cleaned up resolves to stale_ref rather than
+    # to a file that is no longer there.
+    $files = @(Get-ChildItem -LiteralPath $dir -Filter '*.png' -File -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTimeUtc -Descending)
+    for ($i = $keepN; $i -lt $files.Count; $i++) {
+      try { Remove-Item -LiteralPath $files[$i].FullName -Force } catch { }
+    }
+    $script:WpmShots[$shotId] = @{
+      shotId = $shotId; file = $file; scale = $scale; identity = ($scale -eq 1.0)
+      left = [int]$frame.left; top = [int]$frame.top; right = [int]$frame.right; bottom = [int]$frame.bottom
+      imageWidth = [int]$imgW; imageHeight = [int]$imgH; frame = $frame.frame
+      createdAtUtcMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    }
+    # Drop registry entries for shots the retention pass just removed.
+    $live = @{}
+    for ($i = 0; $i -lt [Math]::Min($keepN, $files.Count); $i++) { $live[$files[$i].BaseName] = $true }
+    foreach ($key in @($script:WpmShots.Keys)) {
+      if (-not $live.ContainsKey($key)) { $script:WpmShots.Remove($key) }
+    }
+
+    return @{ ok = $true
+      shotId = $shotId; file = $file
+      screenRect = @{ left = [int]$frame.left; top = [int]$frame.top; right = [int]$frame.right; bottom = [int]$frame.bottom }
+      imageSize = @{ width = [int]$imgW; height = [int]$imgH }
+      scale = $scale; identity = ($scale -eq 1.0); frame = $frame.frame
+      dpiAware = [bool]$script:WpmDpiAware; bytes = [long]$bytes; shotsKeep = $keepN
+      capturedAtUtcMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
+  } finally {
+    if ($resized) { $resized.Dispose() }
+    if ($bmp) { $bmp.Dispose() }
+  }
+}
+
+function Convert-WpmImagePoint {
+  <#
+    THE MULTIPLICATION THE MODEL MUST NOT DO. space:'image' + shotId -> a screen point, using the
+    scale the screenshot itself reported. screenX = screenRect.left + round(imageX / scale), which is
+    the inverse of scale = imagePixels/screenPixels; a shot that was never issued, or one the
+    retention policy already deleted, answers ok=false so the caller can report stale_ref instead of
+    reinterpreting image pixels as screen pixels.
+  #>
+  param([string]$ShotId, [int]$X, [int]$Y)
+  if (-not $ShotId) { return @{ ok = $false; stale = $true; reason = 'space="image" needs a shotId: image coordinates only exist relative to a capture' } }
+  if (-not $script:WpmShots.ContainsKey($ShotId)) {
+    return @{ ok = $false; stale = $true
+      reason = "shotId '$ShotId' is not a screenshot this worker still holds (the retention policy keeps the newest shotsKeep); take a new screenshot" }
+  }
+  $shot = $script:WpmShots[$ShotId]
+  $scale = [double]$shot.scale
+  if ($scale -le 0) { return @{ ok = $false; stale = $true; reason = "shotId '$ShotId' has a non-positive scale ($scale)" } }
+  if ($X -lt 0 -or $Y -lt 0 -or $X -ge [int]$shot.imageWidth -or $Y -ge [int]$shot.imageHeight) {
+    return @{ ok = $false; stale = $false
+      reason = "image point ($X,$Y) is outside the captured image ($($shot.imageWidth)x$($shot.imageHeight)); an image coordinate must address a pixel that exists" }
+  }
+  $sx = [int]$shot.left + [int][Math]::Round($X / $scale)
+  $sy = [int]$shot.top + [int][Math]::Round($Y / $scale)
+  return @{ ok = $true; stale = $false; x = $sx; y = $sy; scale = $scale; shotId = $ShotId }
+}
+
+function Get-WpmPreviewAt {
+  <#
+    WHAT IS UNDER THAT POINT -- answered by the OS, as text. This is the confirmation step that makes
+    an irreversible click reviewable without a picture: AutomationElement.FromPoint plus the
+    ancestry proof the click path already uses (if the climb never meets the target root, the point
+    belongs to another window and the answer is a refusal). No input queue entry, no focus change:
+    the marker is drawn by the caller through overlay.ps1, which is a click-through request.
+  #>
+  param([IntPtr]$Hwnd, [int]$X, [int]$Y)
+  $out = @{ ok = $true; outside = $false; atPoint = $false; name = ''
+    controlType = ''; automationId = ''
+    rect = @{ left = 0; top = 0; right = 0; bottom = 0 }
+    reason = '' }
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    if (-not $root) {
+      return @{ ok = $false; outside = $false; atPoint = $false; name = ''; controlType = ''
+        automationId = ''; rect = @{ left = 0; top = 0; right = 0; bottom = 0 }
+        reason = 'target window has no UI Automation element' }
+    }
+    $pt = New-Object System.Windows.Point([double]$X, [double]$Y)
+    $hitEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+    if (-not $hitEl) {
+      $out.reason = 'nothing at that point is exposed to UI Automation'
+      return $out
+    }
+    $out.atPoint = $true
+
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $el = $hitEl
+    $sawRoot = $false
+    $hop = 0
+    while ($el -and $hop -lt 24) {
+      if ($el -eq $root) { $sawRoot = $true; break }
+      try { $el = $walker.GetParent($el) } catch { $el = $null }
+      $hop++
+    }
+    if (-not $sawRoot) {
+      return @{ ok = $false; outside = $true; atPoint = $true; name = ''; controlType = ''
+        automationId = ''; rect = @{ left = 0; top = 0; right = 0; bottom = 0 }
+        reason = 'the element under that point does not belong to the target window' }
+    }
+
+    try { $out.controlType = ([string]$hitEl.Current.ControlType.ProgrammaticName) -replace '^ControlType\.', '' } catch { }
+    try { $out.name = [string]$hitEl.Current.Name } catch { }
+    try { $out.automationId = [string]$hitEl.Current.AutomationId } catch { }
+    try {
+      $b = $hitEl.Current.BoundingRectangle
+      $out.rect = @{
+        left = [int][Math]::Round($b.Left); top = [int][Math]::Round($b.Top)
+        right = [int][Math]::Round($b.Right); bottom = [int][Math]::Round($b.Bottom)
+      }
+    } catch { }
+    return $out
+  } catch {
+    return @{ ok = $false; outside = $false; atPoint = $false; name = ''; controlType = ''
+      automationId = ''; rect = @{ left = 0; top = 0; right = 0; bottom = 0 }
+      reason = 'the point probe threw: ' + $_.Exception.Message }
+  }
 }

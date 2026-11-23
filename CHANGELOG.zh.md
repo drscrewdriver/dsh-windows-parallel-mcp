@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> 0.5.0 把「帧」变成调用方可读的东西，并把坐标换算从模型手里拿走：新增三个只读动作（`snapshot` 编号元素表、`screenshot` 连映射一起返回、`preview` 用文本报出点位下的元素）、`label` 按 RuntimeId 回指元素、`space:"image"` 由引擎换算，以及第 14 个拒绝码 `stale_ref`。计划中的「元素 rect 必须被 screenRect 包含」被实测推翻（真实窗口出现 3/18/287/2720px 的越界，且 rect 本就是绝对屏幕坐标、与帧无关），改为：越界元素排除并计数、帧与树自报窗口矩形互校（frameCheck/frameInset）、以及「唯一的帧源」结构门禁。全量门禁 17→19，新增 geometry-truth 与 snapshot-test 两套独立 oracle 验收。详情见英文权威条目。另修两处：`uia_tree_empty` 不再对「本来有门、只是被 elementName 抑制」的窗口误报（WinForms 现在诚实回 `unreachable`），以及卡住门禁的偶发红——光标漂移断言改用 `GetLastInputInfo` 排除主人自己动鼠标（有输入则 SKIP 并打印 age/window），引擎自报的精确 read-back 仍是硬断言。
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).

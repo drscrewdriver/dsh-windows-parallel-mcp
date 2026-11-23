@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> O 0.5.0 torna o «quadro» legível por quem chama e retira a aritmética de coordenadas das mãos do modelo: três ações só de leitura (`snapshot` como tabela numerada de elementos, `screenshot` que devolve o mapeamento, `preview` que reporta em texto o elemento sob um ponto), endereçamento por `label` resolvido ao elemento pelo RuntimeId, `space:"image"` convertido pelo motor, e um décimo quarto código de recusa `stale_ref`. O invariante planeado «cada rect de elemento está contido em screenRect» foi refutado pela medição (excessos de 3/18/287/2720px, e um rect é coordenada absoluta de ecrã, independente do quadro): substituído por exclusão contada de elementos fora da captura, verificação cruzada do quadro com o rect declarado pela árvore (frameCheck/frameInset) e um portão estrutural de fonte única. Portões 17→19, duas suites com oráculo independente. Detalhe na entrada inglesa.Mais duas correções: `uia_tree_empty` já não é reportado para janelas que têm porta mas a suprimiram com `elementName` (o WinForms responde agora `unreachable`), e a asserção de deriva do cursor que deixava o portão vermelho de forma intermitente passou a excluir o movimento do dono via `GetLastInputInfo` (SKIP com age/janela quando há entrada; o read-back exato do motor continua a ser uma asserção estrita).
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).

@@ -100,12 +100,19 @@ try {
     "import type { WpmAction, WpmArgs, RefusalCode } from '" + pkg.name + "';",
     "import { ACTIONS } from '" + pkg.name + "';",
     "const a: WpmAction = 'click';",
+    "const read: WpmAction = 'snapshot';",
+    "const shot: WpmAction = 'screenshot';",
+    // The 0.5.0 argument surface, exercised by name: an .d.ts that forgot `space`/`label`/`shotId`
+    // would still compile the older lines, so these are what make the new fields load-bearing.
     "const args: WpmArgs = { action: a, hwnd: '1', x: 2, y: 3, takeover: true, keyInput: 'inject' };",
+    "const img: WpmArgs = { action: a, hwnd: '1', x: 2, y: 3, space: 'image', shotId: 's', label: 1, snapId: 'n' };",
+    "const snap: WpmArgs = { action: read, hwnd: '1', maxElements: 300, interactableOnly: true, sinceSnapId: 'n', intent: 'i' };",
     "const code: RefusalCode = 'takeover_aborted';",
+    "const stale: RefusalCode = 'stale_ref';",
     'const declared: readonly WpmAction[] = ACTIONS;',
     '// The instrument: this line MUST be rejected, by name. See the header.',
     "const mustFail: WpmAction = 'nope';",
-    'void [args, code, declared, mustFail];',
+    'void [read, shot, args, img, snap, code, stale, declared, mustFail];',
     '',
   ].join('\n'));
   writeFileSync(join(scratch, 'tsconfig.json'), JSON.stringify({
@@ -124,7 +131,7 @@ try {
 
   if (errors.length === 1 && isTheInstrument(errors[0])) {
     // Expected shape: exactly the deliberate rejection, and nothing else.
-    console.log('PASS types-consumer: strict tsc accepted all 5 actions, 13 refusal codes, and the exec context ('
+    console.log('PASS types-consumer: strict tsc accepted all 8 actions, 14 refusal codes, the image/label coordinate surface, and the exec context ('
       + tsc.split(/[\\/]/).slice(-3).join('/') + '); by-name resolution through package.json confirmed,'
       + ' and the declaration was proven real by rejecting a wrong action');
     process.exit(0);

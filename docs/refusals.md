@@ -20,10 +20,12 @@ R2′ 把「拒绝」当成本产品的**正常结果**（`engine.ps1` 首段注
 | 层 | 出处 | 数量 | 语义 |
 |---|---|---|---|
 | 决定层 | `src/engine/decide.ps1` 的 `$WpmRefusals` | 10 | 动作**在执行之前**被合法否决，目标本身没被碰过 |
-| 运行时失败层 | `src/engine/engine.ps1` 执行/回还段 | 3 | 决定说「能做」，做的过程中通道炸了、回还没成，或**被所有者/宿主中断** |
+| 运行时失败层 | `src/engine/engine.ps1` 执行/回还段 | 4 | 决定说「能做」，做的过程中通道炸了、回还没成、**被所有者/宿主中断**，或调用里引用的上一代产物**已经不存在了** |
 
-混在一起会让人以为「10 个码都是设计好的分支」，实际后 2 个是**兜底**：它们出现就意味着
-引擎的判断与实际能力不一致，属于需要调查的信号，不该被当成正常分支来轮询。
+混在一起会让人以为「10 个码都是设计好的分支」，实际 `action_failed` 与 `restore_failed` 是**兜底**：
+它们出现就意味着引擎的判断与实际能力不一致，属于需要调查的信号，不该被当成正常分支来轮询。
+`takeover_aborted` 是 R3 明确设计的中断结果（不是故障），`stale_ref` 也是设计好的分支（引用过期，
+有可执行的下一步）——两者之所以归在运行时层，是因为它们只能在执行的当下被判定，而不是在执行前。
 
 ## 决定层（10 码）
 
@@ -40,11 +42,12 @@ R2′ 把「拒绝」当成本产品的**正常结果**（`engine.ps1` 首段注
 | `takeover_unavailable` | `decide.ps1`（`facts.takeoverRequested && !facts.hudReady`）；宿主侧 `lib/index.js` 在 `takeoverAllowed=false` 时直接拒，零 worker 请求 | 要求接管档，但**接管面不存在**：HUD 没起来，或设置里 `takeoverAllowed` 关着 | 在设置里打开 `takeoverAllowed`；HUD 是**硬前置**，不是装饰。不想接管就**去掉 `takeover:true`** 走静默档——本码存在的意义正是「绝不静默降级」 | **REAL** — `test/plugin-test.mjs`（宿主闸：默认关 + `takeover:true` ⇒ 该码且工作进程 0 请求）；`test/takeover-test.ps1` 决策臂 |
 | `keyinject_unavailable` | `decide.ps1`（注入不在接管档内／`keyInjectAllowed` 关／目标不是前台且抬不起来）；`engine.ps1`（发送瞬间前台已变） | 要求键盘注入，但注入会打到**别的窗口**或没被授权。依据是实测：`SendInput` 只写前台（`scripts/probe-sendinput-unicode.ps1` arm B：文本落在前台窗 B，而不是调用方以为的 A） | 先自己把目标切到前台（或用 `focus` 动作把它抬上来），或关掉 `keyInput` 用静默档；不允许「盲注入」 | **REAL** — `test/keyinject-test.ps1` K1（非前台拒绝，注入零次）、K5（双闸独立）；判定层两条用例 |
 
-## 运行时失败层（3 码）
+## 运行时失败层（4 码）
 
 | 码 | 触发条件 | 语义 | 下一步动作 | 实测状态 |
 |---|---|---|---|---|
 | `action_failed` | `engine.ps1:218`（通道调用抛异常） | 决定说能做，实际调用炸了 | 报给所有者并附异常原文；同一目标不要自动重试第二次 | **NOT-COVERED** — 需要可稳定抛错的真实目标，本轮未构造 |
+| `stale_ref` | `engine.ps1`（`space:"image"` 的 `shotId` 不在本进程的截图表里；`label`+`snapId` 不是最新帧；宿主侧 `lib/index.js` 对 `space:"image"` 缺 `shotId` 做前置拒绝） | **引用过期**：这次调用指的是引擎上一代产物（一张已被保留策略删掉的截图，或一帧已被新快照取代的编号表）。编号只在印出它的那一帧里有意义 | 重新 `snapshot` / `screenshot` 拿新 id 再动作。**不要**把图像像素当屏幕像素直接用——那正是本码要挡的「看起来对」的位置错误 | **REAL** — `test/refusals-test.ps1` 执行 `click-stale-shot`：未发过的 `shotId` ⇒ 该码且不进探测 |
 | `restore_failed` | `engine.ps1`（表判 restore、OS 拒绝 SetForegroundWindow） | 所有者被留在了一个不是他选的窗口里 | 立刻上报；不要静默重试，也不要启动看门狗抢第三次 | **NOT-COVERED** — 需提权窗配合，属 task_52 |
 | `takeover_aborted` | `engine.ps1`（HUD 按钮／中断键／宿主取消，三路汇聚后置位） | 接管被**人**或**宿主**中止了。这不是故障，是 R3 承诺的能力：结果里仍带 `cursorRestored` 与 `injectedChars`，让读者知道做到哪一步 | 读 `injectedChars` 判断已写入多少；要接着做就**重新发起**一次动作（不会从断点续写）。不要把它当成失败来重试 | **REAL** — `test/takeover-test.ps1` 三臂（volatile 标志／latch 文件／长文本中途中断），每臂都断言光标回位 |
 

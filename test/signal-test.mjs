@@ -18,10 +18,52 @@ const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '
 const PS = 'powershell.exe';
 let pass = 0;
 const failures = [];
+const skips = [];
 const ok = (name, cond, detail = '') => {
   if (cond) { pass += 1; console.log(`  PASS  ${name}`); }
   else { failures.push(name); console.log(`  FAIL  ${name}${detail ? ` :: ${detail}` : ''}`); }
 };
+const skip = (name, why) => { skips.push(name); console.log(`  SKIP  ${name} :: ${why}`); };
+
+/**
+ * Age of the last PHYSICAL input, in ms (-1 when unreadable).
+ *
+ * WHY THE DRIFT ASSERTION NEEDS THIS. "Is the pointer back where the host interrupted" is graded from
+ * two EXTERNAL reads, and the pointer is shared with the owner. Measured on 2026-11-23 with a human at
+ * the desk: the very same assertion produced drift=11, then 213, then 649 px -- and re-running it with
+ * nobody touching the mouse passed every time. That is an instrument reading somebody else's motion,
+ * not a failed restore, and this repo already established the discipline for exactly this shape
+ * (overlay-test SKIPs its desktop-sensitive arms rather than failing them).
+ *
+ * The interference-free half of the pair stays a HARD assertion: the engine's own cursorAfterX/Y
+ * read-back must equal cursorBeforeX/Y exactly. That is the promise the proof layer judges, and no
+ * external motion can change it.
+ */
+function lastInputAgeMs() {
+  const r = spawnSync(PS, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
+    'Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; ' +
+    'Add-Type -TypeDefinition \'using System;using System.Runtime.InteropServices;' +
+    'public static class LII{[StructLayout(LayoutKind.Sequential)] public struct L{public uint a;public uint b;}' +
+    '[DllImport("user32.dll")] static extern bool GetLastInputInfo(ref L l);' +
+    '[DllImport("kernel32.dll")] static extern ulong GetTickCount64();' +
+    'public static long Age(){L i=new L();i.a=(uint)Marshal.SizeOf(typeof(L));if(!GetLastInputInfo(ref i))return -1;' +
+    'return (long)((uint)(GetTickCount64()&0xFFFFFFFF)-i.b);}}\'; [LII]::Age()'],
+  { encoding: 'utf8', timeout: 30000 });
+  const line = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').filter(Boolean).pop() || '';
+  const n = Number(line);
+  return Number.isFinite(n) ? n : -1;
+}
+
+/** Grade a drift assertion only while the pointer was demonstrably ours throughout the window. */
+function gradeDrift(name, drift, elapsedMs, tolPx, detail) {
+  const age = lastInputAgeMs();
+  if (age < 0) { skip(name, 'the last-input age could not be read, so external motion cannot be ruled out'); return; }
+  if (age < elapsedMs + 500) {
+    skip(name, `a physical input arrived within the measured window (age=${age}ms, window=${elapsedMs}ms); the drift may be the owner's own motion, so it is not graded`);
+    return;
+  }
+  ok(name, drift <= tolPx, detail);
+}
 
 // ---- a real, reachable target ----------------------------------------------------------------
 const exitFile = join(process.env.TEMP || '.', `wpm-signal-test-${Date.now()}.stop`);
@@ -66,6 +108,7 @@ ok('the WinForms target is drivable', Boolean(targetHwnd), targetHwnd || 'never 
 
 // ---- the cancellation -------------------------------------------------------------------------
 const before = cursorPos();
+const beforeAt = Date.now();
 const controller = new AbortController();
 // The arming window is long enough that the abort lands INSIDE it; that is the phase the HUD advertises
 // as "cancellable", so it is the phase the host's cancel has to win in.
@@ -87,6 +130,10 @@ controller.abort();
 }
 const res = await pending;
 const after = cursorPos();
+const afterAt = Date.now();
+// The span the external pair of reads covers. The arming window itself is ~3s of deliberate waiting,
+// so the drift grade is only meaningful where no physical input landed inside this span.
+const driftWindowMs = afterAt - beforeAt;
 
 ok('the cancelled call answers instead of hanging', Boolean(res), JSON.stringify(res)?.slice(0, 200));
 ok('the cancellation is reported as takeover_aborted', res?.refusal === 'takeover_aborted', `${res?.refusal} :: ${res?.text?.slice(0, 200)}`);
@@ -94,7 +141,7 @@ ok('the aborted result still carries the takeover accounting', res?.takeover ===
   JSON.stringify({ takeover: res?.takeover, cursorRestored: res?.cursorRestored, injectedChars: res?.injectedChars }));
 if (before && after) {
   const drift = Math.max(Math.abs(after.x - before.x), Math.abs(after.y - before.y));
-  ok('the cursor is back where the host interrupted (within ambient drift <= 4px)', drift <= 4,
+  gradeDrift('the cursor is back where the host interrupted (within ambient drift <= 4px)', drift, driftWindowMs, 4,
     `before=${before.x},${before.y} after=${after.x},${after.y} drift=${drift}`);
 } else {
   ok('the cursor could be read before and after', false, 'cursor read failed');
@@ -126,5 +173,5 @@ try { target.kill(); } catch { }
 if (existsSync(exitFile)) { try { unlinkSync(exitFile); } catch { } }
 
 console.log('');
-console.log(`signal-test: ${pass} passed, ${failures.length} failed`);
+console.log(`signal-test: ${pass} passed, ${failures.length} failed, ${skips.length} skipped`);
 process.exit(failures.length ? 1 : 0);

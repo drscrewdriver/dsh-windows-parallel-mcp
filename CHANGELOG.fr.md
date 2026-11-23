@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.5.0 — 2026-11-23
+
+> 0.5.0 rend le « cadre » lisible par l'appelant et retire le calcul des coordonnées des mains du modèle : trois actions en lecture seule (`snapshot` en table d'éléments numérotée, `screenshot` qui renvoie la table de correspondance, `preview` qui rapporte en texte l'élément sous un point), l'adressage par `label` résolu vers l'élément via son RuntimeId, `space:"image"` converti par le moteur, et un quatorzième code de refus `stale_ref`. L'invariant prévu « chaque rect d'élément est contenu dans screenRect » a été réfuté par la mesure (dépassements de 3/18/287/2720px, et un rect est une coordonnée écran absolue, indépendante du cadre) : remplacé par l'exclusion comptée des éléments hors capture, un contrôle croisé du cadre avec le rect que l'arbre déclare (frameCheck/frameInset), et un garde-fou structurel de source unique. Portes 17→19 ; deux suites d'oracle indépendantes ajoutées. Voir l'entrée anglaise pour le détail.Deux corrections supplémentaires : `uia_tree_empty` n'est plus rapporté pour une fenêtre qui a bien une porte mais dont la porte a été supprimée par `elementName` (WinForms répond désormais `unreachable`), et l'assertion de dérive du curseur qui rendait la porte rouge par intermittence exclut maintenant l'action du propriétaire via `GetLastInputInfo` (SKIP avec age/fenêtre si une saisie est arrivée ; le read-back exact du moteur reste une assertion stricte).
+
 ## 0.4.1 — 2026-11-23
 
 > Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).
