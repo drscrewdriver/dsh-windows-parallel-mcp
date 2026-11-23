@@ -188,6 +188,15 @@ pass = run('typescript consumer (tsc --noEmit)', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// ...and the IMPLEMENTATION has to agree with that promise, not just be consumable by a client. The
+// lib/ annotations import types/index.d.ts, so this gate is what makes the hand-written contract
+// load-bearing from the inside: renaming a field there turns this red (verified, findings §7.5).
+// Same NAMED SKIP discipline as above -- a machine without tsc is an environment fact.
+pass = run('jsdoc types match the public contract (checkJs)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-jsdoc.mjs'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 // Ten-language documentation is a shipped promise: a missing sibling link or a stale install path
 // teaches the wrong command. Cheap structural gate, runs before the syntax sweep.
 pass = run('i18n docs (10 languages x 3 docs)', () => {

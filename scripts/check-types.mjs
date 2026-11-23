@@ -1,33 +1,14 @@
 // check-types.mjs — verify the shipped .d.ts is consumable by a strict TS client.
 // Uses any tsc 5.x/6.x already present in the workspace; if none is installed this is a NAMED SKIP,
 // never a red against the plugin (a missing compiler is an environment fact, not a contract defect).
+//
+// The compiler search lives in find-tsc.mjs because check-jsdoc.mjs needs the same answer; two
+// gates that disagree about which compiler they tested against would be the drift this repo
+// refuses elsewhere in the file tree.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { findTsc } from './find-tsc.mjs';
 
-function findTsc(start, depth = 0) {
-  if (depth > 3) return null;
-  let ents;
-  try { ents = readdirSync(start); } catch { return null; }
-  // direct node_modules/typescript/bin/tsc
-  const direct = join(start, 'node_modules', 'typescript', 'bin', 'tsc');
-  if (existsSync(direct)) return direct;
-  // pnpm virtual store
-  const pnpm = join(start, 'node_modules', '.pnpm');
-  if (existsSync(pnpm)) {
-    for (const e of readdirSync(pnpm)) {
-      if (!e.startsWith('typescript@')) continue;
-      const p = join(pnpm, e, 'node_modules', 'typescript', 'bin', 'tsc');
-      if (existsSync(p)) return p;
-    }
-  }
-  for (const e of ents) {
-    if (e === 'node_modules' || e === '.git') continue;
-    const p = join(start, e);
-    try { if (statSync(p).isDirectory()) { const r = findTsc(p, depth + 1); if (r) return r; } } catch { }
-  }
-  return null;
-}
 const here = process.cwd();
 const tsc = findTsc(join(here, '..')) || findTsc(here);
 if (!tsc) {

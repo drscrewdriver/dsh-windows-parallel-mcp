@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.4.0 — 2026-11-23
+
+> 実行時の変更はゼロ。作業のすべては「このコメントは正しい」を機械で検証可能にすることに使われました。`lib/` 全体を JSDoc + checkJs で検査（107 エラー → 0）、手書きの `types/index.d.ts` が実装側の唯一の真実源になり（変更すれば赤くなる）、コード未変更は AST のノード単位比較で証明。テスト側の不安定要因2件（pre-layout oracle 競合、対象ウィンドウの遮蔽）も修正。新しい依存はゼロ。詳細は英語版参照。
+
 ## 0.3.0 — 2026-11-23
 
 > 10言語と型付き公開インターフェース。ドキュメントは DSH エコシステムの10言語で提供され、日本語は英語と並ぶ一等スイッチです。インストールは desktop / 非desktop の2通り（desktop は内蔵 pnpm のみ手動、dsh plugin add 禁止）。types/index.d.ts を追加。詳細は英語版参照。

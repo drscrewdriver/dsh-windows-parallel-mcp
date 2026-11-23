@@ -34,7 +34,7 @@ $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="$Title" Width="440" Height="300" WindowStartupLocation="Manual"
-        Left="$X" Top="$Y" ShowInTaskbar="True" Topmost="False"
+        Left="$X" Top="$Y" ShowInTaskbar="True" Topmost="True"
         Background="White">
   <Grid>
     <Button x:Name="alpha" Content="Alpha" Width="160" Height="40"
@@ -57,6 +57,14 @@ $script:counts = @{ alpha = 0; bravo = 0 }
 # WPF's PointToScreen speaks device-independent units: a test that computes the coordinate itself
 # puts the click 1.5x off and then "proves" the product wrong. The only code that knows where its
 # own control really is on screen is the control's own process.
+# WHY Topmost="True" ON A TEST TARGET. The test's question is "did the product act on the point it
+# named", and that question is only decidable if the point actually belongs to this window. With
+# Topmost="False" the target could come up BEHIND whatever held the foreground (this desktop's browser
+# sits right over the -X/-Y area), so the engine's element probe correctly found a foreign window and
+# refused with `unreachable ... the element under that point does not belong to the target window`.
+# That refusal is the PRODUCT behaving properly; the failure was the test asserting against a window
+# it had not put on top. Measured: 3/5 runs failed before, 6/6 pass after. A test harness that cannot
+# guarantee its own precondition is measuring the desktop, not the plugin.
 function Get-PhysicalCentre($el) {
   try {
     # PointToScreen ALREADY returns physical screen pixels. Multiplying by TransformToDevice here
@@ -85,7 +93,13 @@ function Write-Oracle {
 }
 $script:last = 'none'
 $window.Add_ContentRendered({ Write-Oracle })
-Write-Oracle
+# NO Write-Oracle HERE. It used to be called on this line, before ShowDialog(), and that was a bug in
+# the TEST, not in the product: before the window is shown, ActualWidth is 0 and PointToScreen throws,
+# so Get-PhysicalCentre returned its -1 catch-all and a {x:-1,y:-1} oracle was written to disk. The
+# reader then accepted that file as "the app is up" (it only looks for parseable JSON) and asserted
+# against coordinates that never existed. Symptom: the composite gate failed only when the machine was
+# busy enough for the reader to get there before the first real layout. ContentRendered above and the
+# 300ms timer below are the two writers that run with a laid-out window.
 
 $alpha.Add_Click({ $script:counts.alpha++; $script:last = 'alpha'; $alpha.Content = "Alpha($($script:counts.alpha))"; $status.Text = "last=alpha"; Write-Oracle })
 $bravo.Add_Click({ $script:counts.bravo++; $script:last = 'bravo'; $bravo.Content = "Bravo($($script:counts.bravo))"; $status.Text = "last=bravo"; Write-Oracle })

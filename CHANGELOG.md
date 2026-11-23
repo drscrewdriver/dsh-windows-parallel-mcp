@@ -5,6 +5,47 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.4.0 — 2026-11-23
+
+**Nothing about the plugin changed; everything about proving it did.** 0.4.0 has no runtime change at
+all -- the seven files under `lib/` differ from 0.3.0 by comments and JSDoc only, and that is verified
+node by node against the previous revision (identical abstract syntax trees, 6739 nodes in `index.js`,
+2625 in `engine.js`, 3154 in `proof-window.mjs`), not asserted in a commit message. What it adds is the
+machinery that turns "this comment is true" into a gate instead of a promise.
+
+### Added
+- `tsconfig.checkjs.json` + `scripts/check-jsdoc.mjs`: the whole of `lib/` is checked under
+  `allowJs + checkJs + strict`. 107 errors before the annotations, 0 after. No new dependency: the
+  compiler is the workspace's own, and no `@types` path is written into a repo file -- it is derived
+  from where the compiler was found, so a machine without one gets a NAMED SKIP, never a red gate that
+  really means "this box lacks tsc".
+- The hand-written `types/index.d.ts` is now the source of truth for the implementation as well: the
+  `lib/` annotations `import()` it, so renaming a field there turns `lib/index.js` red. Verified by
+  doing exactly that (2 errors) and reverting.
+- `scripts/find-tsc.mjs`: the compiler search that `check-types.mjs` and `check-jsdoc.mjs` share, so the
+  two gates can never disagree about which compiler they tested against.
+- `lib/peers-tools.js` and `lib/peers-schemastery.js` carry `// @ts-nocheck` with the reason written
+  down: they are the host-peer boundary, and a stub type there would assert a shape nobody verified.
+
+### Fixed
+- `test/uia-click-target.ps1` wrote an oracle BEFORE `ShowDialog()`, when `ActualWidth` is still 0 and
+  `PointToScreen` throws. The catch-all wrote `{-1,-1}` and the reader accepted the first parseable
+  snapshot, so on a loaded machine the arm reported four failures that looked like product defects.
+  The pre-show write is gone; the reader now only accepts a snapshot whose both centres are real.
+- That same target came up with `Topmost="False"`, so it could sit BEHIND whatever held the foreground
+  and the engine's element probe correctly found a foreign window:
+  `unreachable ... the element under that point does not belong to the target window`. That refusal was
+  the product behaving properly -- a covered window SHOULD be refused -- and the harness was asserting
+  against a window it had never put on top. Fixed in the harness, not in the engine.
+
+### Verification
+- 16 gates, `GATE GREEN` on three consecutive runs.
+- Desktop suites: hud 24/24, takeover 25/25, keyinject 11 with one named skip (host-managed terminal),
+  signal 6/6, overlay 16/16, marker 10/10.
+- `uia-click-truth` 11 consecutive green runs after the two harness fixes; before them, 3 of 5 failed.
+- Zero install dependencies unchanged: `dependencies` and `devDependencies` are still absent, and
+  `clone && install` still needs no toolchain.
+
 ## 0.3.0 — 2026-11-23
 
 > Published 2026-11-23T09:21:29.737Z (registry `time` for 0.3.0, read from the packument, not from a commit date).

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true
+  },
+  "files": [
+    "lib/config.js",
+    "lib/engine.js",
+    "lib/host-tools.js",
+    "lib/index.js",
+    "lib/peers-schemastery.js",
+    "lib/peers-tools.js",
+    "lib/proof-window.mjs"
+  ]
+}

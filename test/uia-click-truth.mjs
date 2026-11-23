@@ -64,10 +64,20 @@ try {
   schtasks(['/create', '/tn', TASK, '/tr', runner, '/sc', 'once', '/st', '23:59', '/f', '/it']);
   schtasks(['/run', '/tn', TASK]);
 
-  // Wait for the app to publish its own geometry. The point is reported BY THE TARGET, so the
+  // Wait for the app to publish MEANINGFUL geometry. The point is reported BY THE TARGET, so the
   // only thing this test computes is "did the counter for THAT button move".
+  //
+  // Why the loop does not stop at "the file parses": it used to, and that was the bug. The target
+  // wrote an oracle before ShowDialog() with -1,-1 coordinates (ActualWidth was still 0, so
+  // PointToScreen threw and the catch-all won); the reader took the first parseable snapshot and
+  // graded it. Under load the composite gate hit exactly that window and reported four failures that
+  // looked like product defects. A snapshot is only evidence once BOTH centres are real, so a
+  // placeholder is treated as "not up yet" rather than as a measurement.
+  const usable = (s) => Boolean(s)
+    && Number.isFinite(s?.alphaPoint?.x) && s.alphaPoint.x > 0
+    && Number.isFinite(s?.bravoPoint?.x) && s.bravoPoint.x > 0;
   let snap = null;
-  for (let i = 0; i < 60 && !snap; i += 1) {
+  for (let i = 0; i < 60 && !usable(snap); i += 1) {
     await new Promise((r) => setTimeout(r, 500));
     if (!existsSync(oracle)) continue;
     try { snap = JSON.parse(readFileSync(oracle, 'utf8')); } catch { snap = null; }

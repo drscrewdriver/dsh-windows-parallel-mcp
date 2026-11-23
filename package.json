@@ -1,9 +1,10 @@
 {
   "name": "dsh-windows-parallel-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publishConfig": {
     "access": "public",
-    "tag": "latest"
+    "tag": "latest",
+    "registry": "https://registry.npmjs.org/"
   },
   "description": "Drive a Windows window quietly by default and visibly on request: one tool, five actions, a channel decision table that prefers the quiet door, a bounded self-reversing focus flash when only UI Automation can reach the control, and an opt-in takeover tier (HUD mandatory, cursor always restored, keyboard injection only when asked and only for the foreground target). Windows PowerShell 5.1 sidecar, zero install dependencies, no mouse injection.",
   "keywords": [

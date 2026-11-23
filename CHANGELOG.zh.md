@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.4.0 — 2026-11-23
+
+> 没有运行时变更，全部工作用于让「注释是真的」可被机器验证。`lib/` 全量 JSDoc + checkJs（107 错 → 0），手写的 `types/index.d.ts` 成为实现侧唯一真源（改它就会红），并且代码未动是逐 AST 节点证明的而非声称的；另修掉测试夹具的两个不稳定真因（pre-layout oracle 竞态、目标窗口被遮挡）。未新增任何依赖。详情见英文权威条目。
+
 ## 0.3.0 — 2026-11-23
 
 > 十种语言与类型化公开接口。文档现以 DSH 生态十语发布，中文为与英文并列的一等切换；安装明确为 desktop / 非desktop 两类（desktop 只能用内置 pnpm 手动补，禁 dsh plugin add）；新增 types/index.d.ts 类型契约。详情见英文权威条目。

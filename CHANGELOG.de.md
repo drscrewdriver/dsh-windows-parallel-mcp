@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.4.0 — 2026-11-23
+
+> Keine Laufzeitänderung: die ganze Arbeit macht die Aussage „dieser Kommentar ist wahr" maschinell überprüfbar. `lib/` vollständig mit JSDoc versehen und unter checkJs geprüft (107 Fehler → 0), die handgeschriebene `types/index.d.ts` wird zur einzigen Wahrheitsquelle auf Implementierungsseite (eine Änderung dort macht rot), und die Unverändertheit des Codes ist Knoten für Knoten belegt (identische ASTs). Zwei echte Instabilitätsursachen im Testaufbau behoben (Wettlauf um das Pre-Layout-Orakel, verdecktes Ziel-Fenster). Keine neue Abhängigkeit. Siehe englischen Eintrag.
+
 ## 0.3.0 — 2026-11-23
 
 > Zehn Sprachen und eine typisierte öffentliche Oberfläche. Die Dokumentation erscheint in den zehn DSH-Ökosystemsprachen, Deutsch als gleichrangiger Wechsel neben Englisch. Zwei Installationsfälle: desktop (nur integriertes pnpm, nie `dsh plugin add`) und nicht-desktop. `types/index.d.ts` hinzugefügt. Siehe englischen Eintrag.
