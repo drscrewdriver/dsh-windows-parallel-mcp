@@ -7,6 +7,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.1 — 2026-11-23
 
+> Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).
+
 **A documentation release that exists because the front page was wrong.** No runtime change: `lib/`
 and `src/engine/` are untouched, byte for byte, and the tarball's JavaScript is identical to 0.4.0's.
 

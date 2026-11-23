@@ -10,6 +10,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.1 — 2026-11-23
 
+> Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).
+
 > 0.4.1 是文档与门禁发布，运行时零改动（`lib/`、`src/engine/` 逐字节未动）。修掉 README 顶部仍宣告 0.2.0 的欠账、补上从未提及的 `types/index.d.ts` 章节，并新增三道门禁：发布行与 `package.json` 版本比对、九份译文的英文正文逐字节一致、以及按包名解析的消费者测试（此前门禁只按相对路径 import，删掉 `exports[""].types` 也能全绿）。详情见英文权威条目。
 
 ## 0.4.0 — 2026-11-23

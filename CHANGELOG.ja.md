@@ -10,6 +10,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.1 — 2026-11-23
 
+> Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).
+
 > 0.4.1 はドキュメントとゲートのみのリリースで、ランタイム変更はありません（`lib/`、`src/engine/` はバイト単位で未変更）。README 冒頭が 0.2.0 を名乗り続けていた件を修正し、一切言及のなかった `types/index.d.ts` の節を追加。さらに三道のゲートを追加：リリース行と `package.json` の版の照合、9 言語の英本文のバイト一致、パッケージ名で解決する消費者テスト（従来は相対パスのみで、`types` 条件を削っても全緑だった）。詳細は英語版参照。
 
 ## 0.4.0 — 2026-11-23

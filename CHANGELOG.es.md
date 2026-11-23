@@ -10,6 +10,8 @@ one is a promise to anyone installing it.
 
 ## 0.4.1 — 2026-11-23
 
+> Published 2026-11-23T11:07:25.234Z (registry `time` for 0.4.1, read from the packument, not from a commit date).
+
 > 0.4.1 es una publicación solo de documentación y puertas: sin cambios en tiempo de ejecución (`lib/`, `src/engine/` intactos byte a byte). Corrige el encabezado del README que seguía anunciando 0.2.0 y añade la sección sobre `types/index.d.ts`, que faltaba por completo. Tres puertas nuevas: la línea de versión comparada con `package.json`, la identidad byte a byte del cuerpo inglés en las nueve traducciones, y una prueba de consumidor que resuelve por nombre de paquete (la anterior solo usaba una ruta relativa, así que quitar la condición `types` dejaba todo en verde). Véase la entrada en inglés.
 
 ## 0.4.0 — 2026-11-23
