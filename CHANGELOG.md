@@ -5,6 +5,105 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.7.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.7.0, read from the packument, not from a commit date).
+
+**The gap that was "you cannot even start a program" is closed, and the binary permission gate becomes
+one ceiling over eleven declared rungs.** Three new actions, one authorization model, an audit trail,
+two new refusal codes' worth of vocabulary... in fact exactly three new codes and fourteen unchanged.
+
+### Added — three desktop actions
+
+- **`launch`** — starts a program by name or absolute path, behind **two switches that do not imply each
+  other**: `appLaunchAllowed` (the capability) and `appLaunchAllow` (an **exact, case-folded** whitelist,
+  empty by default = nothing may launch, no wildcard and no prefix match, so `notepad` never authorises
+  `notepad-helper.exe`). Refused with `app_launch_denied` before any worker request — asserted with a
+  counted worker, and re-checked inside the engine against the same table, because a permission that
+  lives in only one process is a permission that can be reached around by calling the other. A process
+  with no window yet answers `ok:true` + `hwnd=""` + `detail=window-not-yet` (measured:
+  `MainWindowHandle=0` for 1348 ms on a cold notepad) rather than pretending the start failed or the
+  window exists. Arguments are passed through as given and written to the audit log: a whitelist vouches
+  for a program, not for what it is told to do.
+- **`clipboard`** — read/write, text and image. A text read reports its **length and never the payload**
+  (the clipboard may hold a token the owner copied seconds ago), values are capped at 64 KB with
+  `truncated` stated, an image write accepts a `shotId` so a screenshot can go straight in, and a
+  clipboard holding neither is refused with the format names it did find.
+- **`window`** — `minimize`/`restore`/`move`/`resize`/`topmost` on ONE hwnd. Every op is verified by
+  reading the window's own state back (`IsIconic`, `GetWindowRect`, `WS_EX_TOPMOST`), not by the
+  syscall's return value, and the result carries `foregroundTaken` measured on both sides of that call:
+  `restore` activates by definition (SW_RESTORE measured: foreground moved), and saying so is the honest
+  answer rather than hiding it or refusing the op that was asked for. No "all windows" op exists.
+- The action count is **8 → 11**, kept in step in four places (`ACTIONS`, the discriminator enum,
+  `tools.json`, `types/index.d.ts`) with a check-types log line that now READS those counts from the
+  contract instead of reciting a literal — the 0.5.0 wording would have had a green gate announcing
+  "8 actions" the moment there were eleven.
+
+### Changed — one ceiling instead of one switch per capability
+
+- Every action now declares `requiresTier` (`readonly|quiet|flash|takeover`) — the LOWEST rung it can
+  ever need — and the owner sets one `policy` (`readonly|quiet|balanced(default)|full`). Adding a
+  capability never means adding a setting, and an **undeclared** action is graded `takeover` rather than
+  allowed: silence about a capability must not read as permission for it. `clipboard` is the one action
+  whose halves differ, so `requiresTierFor` refines it (`read`=readonly, `write`=flash) and a
+  `readonly` owner can still read.
+- Validation order is the safety design: `paused → policy → takeoverAllowed/keyInjectAllowed → launch
+  gate + whitelist → idle check → the door table`. Each step is tested by making two gates disagree about
+  which one spoke, so an order change fails a test instead of silently changing what a refusal means.
+- **`takeover:true` now needs `policy:'full'` in addition to `takeoverAllowed` — an intentional
+  tightening, and the one breaking consequence of this release.** An existing setup that enabled
+  takeover will see `policy_denied` until the ceiling is raised; the refusal names both knobs and which
+  one to turn. The same applies to `keyInput:"inject"`.
+- **`user_active` instead of a dialog.** When the last physical input is younger than `policyIdleMs`
+  (default 3000 ms) a takeover-tier call is refused and NOTHING is interrupted — the upstream design
+  opens a 10-second countdown even while the owner is typing, and an interrupt presented as consent is
+  just a second disturbance. `forceUserActive:true` overrides it explicitly, bypasses nothing else, and
+  is recorded in the audit as `forced:true`.
+- New codes `app_launch_denied`, `policy_denied`, `user_active` (14 → **17**), each naming a SETTING as
+  its next step — which is what distinguishes them from the fourteen that name a state of the target.
+- **Audit log**: one JSONL line per action to `%LOCALAPPDATA%\wpm\audit.log`, for allow AND deny
+  (a trail that records only refusals is silent about the times the guard had nothing to do with),
+  fields `ts, action, hwnd, tier, policy, decision, code, userActiveAgeMs, effect, latencyMs` plus
+  `target`/`args` for launches and `op`/`format`/`chars` for clipboard calls. Content is never recorded.
+  `auditKeep` (default 2000) prunes oldest-first; a failed write is reported, not swallowed.
+
+### Fixed
+
+- **`Clipboard.Flush()` does not exist on this engine's runtime.** The first version of the clipboard
+  branch threw "Clipboard does not contain a method named 'Flush'" — `Flush` is .NET Core, and the
+  platform floor is Windows PowerShell 5.1 (.NET Framework 4.x). Now `SetDataObject($v, $true)`, which
+  is also the call that makes the data outlive the process.
+- **A refusal handler that read a key its branch never sets.** `Wait-WpmAppWindow` answers three shapes
+  (window found / not yet / process gone) and `Invoke-WpmWindowOp` carries `activated` only on one op;
+  under `Set-StrictMode 2.0` those reads threw and surfaced as `action_failed` on a call that had
+  actually worked. Presence is now tested per branch.
+- Booleans in `window` details are lower-cased (`topmost=true`, not `Topmost=True`), matching every
+  other field this engine writes.
+
+### Gates and tests
+
+- Gate 21: `scripts/check-policy-table.mjs --self-test` — every action declares a rung, the rung exists
+  in the ladder, the ladder in `lib/policy.js` and the one in `src/engine/decide.ps1` are THE SAME LIST
+  IN THE SAME ORDER, and every `requiresTierFor` op is an op the tool can actually receive. Five
+  mutations, each seen red. The copy is deliberate (host and engine each need the comparison in their own
+  process); the check is what makes two copies one rule.
+- `scripts/check-jsdoc.mjs` now asserts that `tsconfig.checkjs.json` covers **every** file in `lib/`. The
+  hand-kept list had silently left `lib/policy.js` and `lib/audit.js` unchecked while the gate reported
+  "7 files, 0 errors" — a new module nobody adds to a list is a module whose annotations are prose.
+- `test/desktop-actions.mjs` (new, 42 assertions): the launched program's window is found and read
+  through the engine, then verified by a SECOND process that knows nothing about wpm (`IsWindow`,
+  `IsIconic`, `GetWindowRect`, the ex-style bit); clipboard text and image round-trips; all five window
+  ops with two readings each; and the audit log checked for shape — launch lines carry target+arguments,
+  clipboard lines carry no payload, denials carry their code, forced overrides are distinguishable.
+- `test/plugin-test.mjs` gains the gate-order arms (policy before the per-tier gates, both launch
+  switches, `readonly` still serving reads, an exact whitelist hit forwarded) and counts request
+  DELTAS rather than absolute zeros, so a forwarding arm inserted earlier cannot make a gate test pass
+  by accident. 98 → 108 assertions.
+- Full gate: **21 arms, `GATE GREEN` ×3**; `check-no-cursor-control` unchanged (two whitelisted primitive
+  uses, same file list) — adding launch/window did not open a door to `MOUSEEVENTF_*`/`mouse_event`/
+  `keybd_event`; `check-frame-single-source` still sees exactly one `CopyFromScreen` call site.
+- Zero install dependencies unchanged.
+
 ## 0.6.0 — 2026-11-23
 
 > Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).

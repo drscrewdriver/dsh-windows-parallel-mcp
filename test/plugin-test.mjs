@@ -85,19 +85,20 @@ ok('every contract tool name is mapped, and nothing extra', JSON.stringify(proje
 
 const schema = parametersToJsonSchema(PARAMETERS);
 ok('the action discriminator is required', schema.required.includes('action'), JSON.stringify(schema.required));
-ok('the discriminator enum equals the eight actions', JSON.stringify([...schema.properties.action.enum].sort()) === JSON.stringify(projectedActions),
+ok(`the discriminator enum equals the ${contractActions.length} contract actions`, JSON.stringify([...schema.properties.action.enum].sort()) === JSON.stringify(projectedActions),
   JSON.stringify(schema.properties.action.enum));
 ok('the registered schema forbids undeclared arguments', schema.additionalProperties === false);
 
 // Every required argument each contract tool names must exist in the registered parameters, or the
 // model is told to send something the registry rejects.
+// Written as a direct membership test rather than the earlier allowlist of names: the allowlist could
+// only ever recognise the arguments that existed when it was typed, so adding `target` and `op` in
+// 0.7.0 would have failed the check for the wrong reason -- the test would have been enforcing a list
+// of old parameter names instead of the property it was written to prove.
 for (const tool of contract.tools) {
   for (const arg of tool.inputSchema.required ?? []) {
-    if (arg === 'hwnd' || arg === 'x' || arg === 'y' || arg === 'text' || arg === 'elementName' || arg === 'replace' || arg === 'settleMs' || arg === 'action') {
-      ok(`contract ${tool.name}: '${arg}' is a registered parameter`, arg in schema.properties);
-    } else {
-      ok(`contract ${tool.name}: '${arg}' maps to a registered parameter`, false, 'unmapped required argument');
-    }
+    ok(`contract ${tool.name}: required '${arg}' is a registered parameter`, arg in schema.properties,
+      `known=${Object.keys(schema.properties).join(',')}`);
   }
 }
 
@@ -282,11 +283,24 @@ ok('disabled plugin refuses before reaching the engine', offResult.ok === false 
   const seen = [];
   WorkerClient.prototype.request = function patched(payload) {
     seen.push(payload);
+    // A launch is NEVER forwarded to the real worker in this file. Recording the payload is the entire
+    // assertion -- "the gate let it through, and this is what the request looked like" -- while calling
+    // through would start a real process on whatever machine runs the suite. An authorised action that
+    // spawns something has to be testable without spawning it: stub the effect, keep the observation.
+    if (payload.action === 'launch') {
+      return Promise.resolve({ ok: true, result: { ok: true, action: 'launch', refusal: '', pid: 424242,
+        processName: 'stubbed', hwnd: '', detail: 'launched pid=424242 window-not-yet waitedMs=1',
+        effect: 'unverified', latencyMs: 1 } });
+    }
     return original.call(this, payload);
   };
   try {
+    // 0.7.0 gives `policy` the FIRST word: a takeover request needs the ceiling to reach the takeover rung
+    // as well as the takeoverAllowed switch. These arms therefore open the ceiling so that the code they
+    // assert is really the gate they name -- otherwise every one of them would now report policy_denied
+    // and the R3 assertions would be testing the wrong branch while still passing on a code match.
     const gated = makeCtx();
-    mod.apply(gated, {});
+    mod.apply(gated, { policy: 'full' });
     const gatedTool = gated.registered[0];
 
     const noTakeover = await gatedTool.execute({ action: 'click', hwnd: '1', x: 10, y: 10, takeover: true });
@@ -302,42 +316,123 @@ ok('disabled plugin refuses before reaching the engine', offResult.ok === false 
       JSON.stringify(noInject).slice(0, 200));
     ok('  ... and that refusal never reached the worker either', seen.length === 0, JSON.stringify(seen));
 
+    // ---- 0.7.0: the ceiling is checked BEFORE the per-tier gates -------------------------------
+    // Order is the safety design, and the way to prove an order is to make the two gates disagree about
+    // which one spoke. Here takeoverAllowed is OFF and policy is left at its `balanced` default: the
+    // answer must be policy_denied, because the ceiling is consulted first and a refusal that named the
+    // settings in the wrong order would teach callers to raise the wrong knob.
+    const ceilingFirst = makeCtx();
+    mod.apply(ceilingFirst, {});                      // policy defaults to balanced, takeoverAllowed off
+    const cfTool = ceilingFirst.registered[0];
+    const capped = await cfTool.execute({ action: 'click', hwnd: '1', x: 10, y: 10, takeover: true });
+    ok('a takeover request under the default balanced ceiling is policy_denied, not takeover_unavailable',
+      capped.ok === false && capped.refusal === 'policy_denied', JSON.stringify(capped).slice(0, 240));
+    ok('  ... and the refusal names both the rung needed and the ceiling in force',
+      /needs 'takeover'/.test(capped.text) && /balanced/.test(capped.text), capped.text);
+    ok('  ... with zero worker requests', seen.length === 0, JSON.stringify(seen));
+
+    // The same action with the ceiling raised is then refused by the OLD gate -- which is what proves the
+    // two keys are independent rather than one gate wearing two names.
+    const ceilingRaised = makeCtx();
+    mod.apply(ceilingRaised, { policy: 'full' });
+    const crTool = ceilingRaised.registered[0];
+    const stillGated = await crTool.execute({ action: 'click', hwnd: '1', x: 10, y: 10, takeover: true });
+    ok('raising policy alone does not open takeover (takeoverAllowed is still required)',
+      stillGated.ok === false && stillGated.refusal === 'takeover_unavailable', JSON.stringify(stillGated).slice(0, 200));
+
+    // ---- 0.7.0 launch: two switches, both pre-worker, and a READ that stays allowed -------------
+    const launchOff = makeCtx();
+    mod.apply(launchOff, { policy: 'full', appLaunchAllowed: false, appLaunchAllow: ['notepad'] });
+    const loTool = launchOff.registered[0];
+    const launchDenied = await loTool.execute({ action: 'launch', target: 'notepad' });
+    ok('launch with appLaunchAllowed off is refused with its own code',
+      launchDenied.ok === false && launchDenied.refusal === 'app_launch_denied', JSON.stringify(launchDenied).slice(0, 220));
+    ok('  ... and the refusal makes clear nothing was started', /no worker request|nothing/i.test(launchDenied.text), launchDenied.text);
+    const notListed = await loTool.execute({ action: 'launch', target: 'calc' });
+    ok('the gate being ON is not enough: the name must be on the list',
+      notListed.refusal === 'app_launch_denied', JSON.stringify(notListed).slice(0, 220));
+
+    const launchOn = makeCtx();
+    mod.apply(launchOn, { policy: 'full', appLaunchAllowed: true, appLaunchAllow: ['notepad'] });
+    const lnTool = launchOn.registered[0];
+    const beforeLaunch = seen.length;
+    const listed = await lnTool.execute({ action: 'launch', target: 'NOTEPAD' });
+    ok('an exact, case-folded whitelist hit is forwarded to the worker',
+      seen.length === beforeLaunch + 1 && seen[seen.length - 1].action === 'launch', JSON.stringify(seen.slice(-1)));
+    ok('  ... and the request carries the gate state so the engine can re-check it',
+      seen[seen.length - 1].launchAllowed === true && Array.isArray(seen[seen.length - 1].allowList),
+      JSON.stringify(seen[seen.length - 1]));
+    void listed;
+
+    const launchCapped = makeCtx();
+    mod.apply(launchCapped, { policy: 'balanced', appLaunchAllowed: true, appLaunchAllow: ['notepad'] });
+    const lcTool = launchCapped.registered[0];
+    const launchCapped2 = await lcTool.execute({ action: 'launch', target: 'notepad' });
+    ok('launch needs the FULL ceiling even with both launch switches on',
+      launchCapped2.refusal === 'policy_denied', JSON.stringify(launchCapped2).slice(0, 220));
+
+    // `policy:'readonly'` must not become "nothing works": the reads stay open, and the loudest write is
+    // the one that is refused. A ceiling that over-refuses would be tuned away by the first user hit.
+    const readOnlyPolicy = makeCtx();
+    mod.apply(readOnlyPolicy, { policy: 'readonly' });
+    const roTool = readOnlyPolicy.registered[0];
+    const readStill = await roTool.execute({ action: 'windows' });
+    ok('policy:readonly still serves the read actions', readStill.refusal !== 'policy_denied',
+      JSON.stringify(readStill).slice(0, 160));
+    const writeStopped = await roTool.execute({ action: 'click', hwnd: '1', x: 5, y: 5 });
+    ok('policy:readonly refuses a message-door click', writeStopped.refusal === 'policy_denied',
+      JSON.stringify(writeStopped).slice(0, 200));
+
     // The K5 independence arm: injection open, takeover closed. Injection must stay impossible, because
     // SendInput writes to the foreground and the takeover tier is what makes that a declared action.
     const openInject = makeCtx();
-    mod.apply(openInject, { keyInjectAllowed: true });
+    mod.apply(openInject, { keyInjectAllowed: true, policy: 'full' });
     const openTool = openInject.registered[0];
+    const beforeInject = seen.length;
     const injectNoTakeover = await openTool.execute({ action: 'type', hwnd: '1', text: 'x', keyInput: 'inject' });
     ok('keyInjectAllowed alone does not enable injection (it needs the takeover tier)',
       injectNoTakeover.ok === false && injectNoTakeover.refusal === 'keyinject_unavailable',
       JSON.stringify(injectNoTakeover).slice(0, 200));
-    ok('  ... with zero worker traffic', seen.length === 0, JSON.stringify(seen));
+    // Counted as a DELTA, not against zero: by this point the block has legitimately forwarded other
+    // requests, and "no NEW request" is the property the gate claims. An absolute `=== 0` here passes only
+    // because of the order of the arms above it, and goes false the moment a forwarding arm is inserted
+    // earlier -- which is a test that measures its own position in the file.
+    ok('  ... with no new worker request', seen.length === beforeInject, `${beforeInject} -> ${seen.length}`);
 
     // The other direction: takeover open, injection closed. Same code, and still no request.
     const noKeyGate = makeCtx();
-    mod.apply(noKeyGate, { takeoverAllowed: true, keyInjectAllowed: false });
+    mod.apply(noKeyGate, { takeoverAllowed: true, keyInjectAllowed: false, policy: 'full' });
     const noKeyTool = noKeyGate.registered[0];
+    const beforeKeyGate = seen.length;
     const injectDenied = await noKeyTool.execute({ action: 'click', hwnd: '1', x: 10, y: 10, takeover: true, keyInput: 'inject' });
     ok('an unauthorised keyInput is refused even when takeover is allowed',
       injectDenied.ok === false && injectDenied.refusal === 'keyinject_unavailable',
       JSON.stringify(injectDenied).slice(0, 200));
-    ok('  ... and it costs no worker request', seen.length === 0, JSON.stringify(seen));
+    ok('  ... and it costs no new worker request', seen.length === beforeKeyGate, `${beforeKeyGate} -> ${seen.length}`);
 
     // An AUTHORISED request is forwarded, with the per-call ceiling, and carries no keyInput at all when
     // the caller did not ask for injection.
     const allowed = makeCtx();
-    mod.apply(allowed, { takeoverAllowed: true });
+    mod.apply(allowed, { takeoverAllowed: true, policy: 'full' });
     const allowedTool = allowed.registered[0];
     await allowedTool.execute({ action: 'click', hwnd: '1', x: 10, y: 10, takeover: true });
-    const forwarded = seen.find((p) => p.action === 'click');
+    const forwarded = seen.find((p) => p.action === 'click' && p.takeover === true);
     ok('an authorised takeover reaches the worker with takeover:true', !!forwarded && forwarded.takeover === true,
       JSON.stringify(forwarded));
     ok('  ... with a numeric per-call ceiling', !!forwarded && typeof forwarded.takeoverMaxMs === 'number',
       JSON.stringify(forwarded));
     ok('  ... and no keyInput field when none was asked for', !!forwarded && !('keyInput' in forwarded),
       JSON.stringify(forwarded));
+    ok('  ... and the ceiling travels with it so the engine can rank the call the same way',
+      !!forwarded && forwarded.policy === 'full' && forwarded.requiredTier === 'quiet', JSON.stringify(forwarded));
 
     await gated.dispose();
+    await ceilingFirst.dispose();
+    await ceilingRaised.dispose();
+    await launchOff.dispose();
+    await launchOn.dispose();
+    await launchCapped.dispose();
+    await readOnlyPolicy.dispose();
     await openInject.dispose();
     await noKeyGate.dispose();
     await allowed.dispose();

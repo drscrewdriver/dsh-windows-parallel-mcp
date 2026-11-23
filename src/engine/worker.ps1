@@ -129,6 +129,10 @@ while ($true) {
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action click `
           -X ([int](Get-Arg $req 'x' -1)) -Y ([int](Get-Arg $req 'y' -1)) `
           -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
+          -Policy ([string](Get-Arg $req 'policy' 'balanced')) `
+          -RequiredTier ([string](Get-Arg $req 'requiredTier' 'quiet')) `
+          -PolicyIdleMs ([int](Get-Arg $req 'policyIdleMs' 3000)) `
+          -ForceUserActive:([bool](Get-Arg $req 'forceUserActive' $false)) `
           -Space ([string](Get-Arg $req 'space' 'screen')) `
           -ShotId ([string](Get-Arg $req 'shotId' '')) `
           -Label ([int](Get-Arg $req 'label' 0)) `
@@ -150,6 +154,10 @@ while ($true) {
           -Label ([int](Get-Arg $req 'label' 0)) `
           -SnapId ([string](Get-Arg $req 'snapId' '')) `
           -CaretPosition ([string](Get-Arg $req 'caretPosition' 'idle')) `
+          -Policy ([string](Get-Arg $req 'policy' 'balanced')) `
+          -RequiredTier ([string](Get-Arg $req 'requiredTier' 'quiet')) `
+          -PolicyIdleMs ([int](Get-Arg $req 'policyIdleMs' 3000)) `
+          -ForceUserActive:([bool](Get-Arg $req 'forceUserActive' $false)) `
           -Replace:([bool](Get-Arg $req 'replace' $false)) -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
           -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
           -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000)) `
@@ -164,6 +172,10 @@ while ($true) {
           -Label ([int](Get-Arg $req 'label' 0)) `
           -SnapId ([string](Get-Arg $req 'snapId' '')) `
           -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
+          -Policy ([string](Get-Arg $req 'policy' 'balanced')) `
+          -RequiredTier ([string](Get-Arg $req 'requiredTier' 'quiet')) `
+          -PolicyIdleMs ([int](Get-Arg $req 'policyIdleMs' 3000)) `
+          -ForceUserActive:([bool](Get-Arg $req 'forceUserActive' $false)) `
           -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
           -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000))
         Write-Response $id @{ id = $id; ok = $true; result = $r }
@@ -191,6 +203,46 @@ while ($true) {
         # any input queue. No proof window is produced -- there is no action to prove.
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action preview `
           -X ([int](Get-Arg $req 'x' -1)) -Y ([int](Get-Arg $req 'y' -1))
+        Write-Response $id @{ id = $id; ok = $true; result = $r }
+      }
+      # ---- 0.7.0 desktop actions ---------------------------------------------------------------
+      # These three are dispatched to Invoke-WpmDesktopAction rather than Invoke-WpmAction: they choose
+      # no channel and cost no tier, so the door table has nothing to say about them. The SETTINGS gates
+      # (appLaunchAllowed and its whitelist, the policy tier, the idle check) live in the host half and
+      # have already been applied -- a request that reached here was authorised, exactly as with
+      # takeover:true above, and the engine still re-checks what only it can see (a live hwnd, the real
+      # window state after the call).
+      'launch' {
+        $argv = Get-Arg $req 'args' @()
+        if ($null -eq $argv) { $argv = @() }
+        $allow = Get-Arg $req 'allowList' @()
+        if ($null -eq $allow) { $allow = @() }
+        $r = Invoke-WpmDesktopAction -Action launch `
+          -Target ([string](Get-Arg $req 'target' '')) `
+          -Arguments $argv `
+          -WaitMs ([int](Get-Arg $req 'waitMs' 3000)) `
+          -Policy ([string](Get-Arg $req 'policy' 'balanced')) `
+          -PolicyIdleMs ([int](Get-Arg $req 'policyIdleMs' 3000)) `
+          -ForceUserActive:([bool](Get-Arg $req 'forceUserActive' $false)) `
+          -AppLaunchAllowed:([bool](Get-Arg $req 'launchAllowed' $false)) `
+          -AppLaunchAllow ([string[]]@($allow))
+        Write-Response $id @{ id = $id; ok = $true; result = $r }
+      }
+      'clipboard' {
+        $r = Invoke-WpmDesktopAction -Action clipboard `
+          -Op ([string](Get-Arg $req 'op' 'read')) `
+          -Format ([string](Get-Arg $req 'format' 'text')) `
+          -Text ([string](Get-Arg $req 'text' '')) `
+          -ShotId ([string](Get-Arg $req 'shotId' '')) `
+          -MaxChars ([int](Get-Arg $req 'maxChars' 65536))
+        Write-Response $id @{ id = $id; ok = $true; result = $r }
+      }
+      'window' {
+        $r = Invoke-WpmDesktopAction -Action window `
+          -Hwnd ([string](Get-Arg $req 'hwnd' '')) `
+          -Op ([string](Get-Arg $req 'op' '')) `
+          -X ([int](Get-Arg $req 'x' 0)) -Y ([int](Get-Arg $req 'y' 0)) `
+          -Width ([int](Get-Arg $req 'width' 0)) -Height ([int](Get-Arg $req 'height' 0))
         Write-Response $id @{ id = $id; ok = $true; result = $r }
       }
       'hud' {

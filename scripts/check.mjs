@@ -138,6 +138,17 @@ pass = run('capture backend reported, fallback reachable (self-tested)', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// 0.7.0-B's own gate. The authorization ladder is deliberately written twice -- once in JS for the host
+// gate that costs zero worker requests, once in PowerShell for the engine that owns the last-input
+// measurement -- and a permission copied without a check is a permission that drifts silently while
+// looking enforced. This gate reads BOTH ladders as text and requires them to be the same list in the
+// same order, plus every action's declared rung to be a rung that exists. Self-tested because an
+// always-green permission check is the most dangerous kind of always-green check.
+pass = run('policy ladder: contract = host = engine (self-tested)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-policy-table.mjs', '--self-test'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 // The package that gets installed is the product. A missing engine file or a swept-in .tmp/ both
 // install cleanly and fail later, so the tarball is checked here rather than discovered at install.
 pass = run('package tarball contents', () => {

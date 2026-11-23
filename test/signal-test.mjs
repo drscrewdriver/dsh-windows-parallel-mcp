@@ -85,7 +85,12 @@ const ctx = {
 // Both gates ON: the takeover tier is what has an interruption path at all.
 // A long arming window is a SETTING, not a per-call argument: it is the owner's patience, not the
 // caller's. 3 s puts the abort firmly inside the phase the HUD advertises as cancellable.
-mod.apply(ctx, { takeoverAllowed: true, keyInjectAllowed: true, takeoverArmMs: 3000 });
+// 0.7.0: `policy:'full'` is the ceiling this file's whole subject needs. What is under test here is that
+// a CANCELLATION reaches the takeover tier at all (the latch, the abort code, the accounting), and the
+// new policy gate refuses the request before any of that can happen. Leaving the ceiling at its
+// `balanced` default would make every arm here report policy_denied -- a correct refusal, and a test
+// that no longer measures the thing it was written for.
+mod.apply(ctx, { takeoverAllowed: true, keyInjectAllowed: true, policy: 'full', takeoverArmMs: 3000 });
 const tool = registered[0];
 
 function cursorPos() {
@@ -115,8 +120,13 @@ const controller = new AbortController();
 // A `type` on a WinForms target goes through the message door (no coordinates to get wrong), so the only
 // thing this arm can be measuring is the cancellation itself. A 3 s arming window puts the abort firmly
 // inside the phase the HUD advertises as cancellable.
+// 0.7.0's idle check is real, and this run just proved it: a human was at the keyboard, so the request
+// was refused with `user_active` before the takeover tier existed for it. What this file measures is the
+// CANCELLATION path, so it passes the documented override -- which is also the honest way to exercise
+// it: an automated caller that legitimately runs while the owner is present. The audit line records
+// forced:true, and the refusal still fires for anyone who does not ask.
 const pending = tool.execute(
-  { action: 'type', hwnd: targetHwnd, text: 'signal-abort-probe', takeover: true, takeoverMaxMs: 8000, settleMs: 60 },
+  { action: 'type', hwnd: targetHwnd, text: 'signal-abort-probe', takeover: true, takeoverMaxMs: 8000, forceUserActive: true, settleMs: 60 },
   { signal: controller.signal });
 await new Promise((r) => setTimeout(r, 350));
 controller.abort();

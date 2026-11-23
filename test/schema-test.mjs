@@ -54,10 +54,14 @@ function validate(sch, value, path) {
 // --- the contract's own shape ---------------------------------------------------------------
 if (!schema.stance || !schema.stance.inputQueue || !schema.stance.cursor) fail('schema.stance must state what the engine does not do');
 
-const EXPECTED = ['wpm_windows', 'wpm_click', 'wpm_type', 'wpm_focus', 'wpm_status', 'wpm_snapshot', 'wpm_screenshot', 'wpm_preview'];
+// Grown with the contract, and the growth is the point of listing it here at all: 0.5.0 added three read
+// actions and 0.7.0 added three desktop actions, so the set a model can reach is eleven. An extra name
+// here is a contract change; a missing one is a tool nothing can call.
+const EXPECTED = ['wpm_windows', 'wpm_click', 'wpm_type', 'wpm_focus', 'wpm_status', 'wpm_snapshot',
+  'wpm_screenshot', 'wpm_preview', 'wpm_launch', 'wpm_clipboard', 'wpm_window'];
 const names = schema.tools.map((t) => t.name);
 for (const n of EXPECTED) if (!names.includes(n)) fail(`missing tool '${n}'`);
-for (const n of names) if (!EXPECTED.includes(n)) fail(`unexpected tool '${n}' (the surface is fixed at eight; adding one is a contract change)`);
+for (const n of names) if (!EXPECTED.includes(n)) fail(`unexpected tool '${n}' (the surface is fixed at eleven; adding one is a contract change)`);
 if (new Set(names).size !== names.length) fail('duplicate tool name');
 
 for (const tool of schema.tools) {
@@ -79,6 +83,22 @@ for (const tool of schema.tools) {
   // The one field that must never appear: an input-method switch would advertise a capability the
     // product does not have and cannot test.
   if ('physical' in (is.properties ?? {})) fail(`${tool.name}: inputSchema must not expose a 'physical' field`);
+}
+
+// --- 0.7.0: the rung every action must declare ------------------------------------------------
+// Checked here as well as in scripts/check-policy-table.mjs because this file owns "the contract is
+// internally sound" while that gate owns "the three copies agree". Both are cheap; neither subsumes the
+// other, and the failure mode they share -- an action nobody classified -- is the one that turns a
+// permission setting into decoration.
+for (const tool of schema.tools) {
+  if (typeof tool.requiresTier !== 'string' || !['readonly', 'quiet', 'flash', 'takeover'].includes(tool.requiresTier)) {
+    fail(`${tool.name}: requiresTier must be declared and one of readonly|quiet|flash|takeover (got ${JSON.stringify(tool.requiresTier)})`);
+  }
+  if (tool.requiresTierFor) {
+    for (const [op, tier] of Object.entries(tool.requiresTierFor)) {
+      if (!['readonly', 'quiet', 'flash', 'takeover'].includes(tier)) fail(`${tool.name}.requiresTierFor.${op}: '${tier}' is not a rung`);
+    }
+  }
 }
 
 // --- the host projection agrees with the registered parameters ------------------------------

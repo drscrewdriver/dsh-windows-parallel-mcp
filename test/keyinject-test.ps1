@@ -124,7 +124,10 @@ try {
         Skip 'K4: real console delivery' ('could not bring the console to the foreground: ' + [string]$fc.reason)
       } else {
         $cmd = "'wpm-ok' | Out-File -FilePath " + "'" + $outFile + "'" + ' -Encoding ascii'
-        $res = Invoke-WpmAction -Hwnd ([string]$conHwnd.ToInt64()) -Action type -Text $cmd -Takeover -KeyInject -TakeoverArmMs 0 -HudDoneMs 0 -TakeoverMaxMs 8000 -SettleMs 100
+        # -Policy 'full' is the 0.7.0 precondition: the injection tier now needs the ceiling as well as
+        # the two gates. Without it the call is refused with policy_denied before SendInput is ever
+        # considered, and this arm would be measuring a settings answer instead of an injection one.
+        $res = Invoke-WpmAction -Hwnd ([string]$conHwnd.ToInt64()) -Action type -Text $cmd -Takeover -KeyInject -Policy 'full' -ForceUserActive -TakeoverArmMs 0 -HudDoneMs 0 -TakeoverMaxMs 8000 -SettleMs 100
         Ok 'K4: the terminal request goes through the takeover tier (not terminal_no_door)' ([string]$res.tier -eq 'takeover' -and [string]$res.refusal -eq '') ([string]$res.tier + '/' + [string]$res.refusal + ' ' + [string]$res.reason)
         Ok 'K6: an injected write reports effect=reported-by-send' ([string]$res.effect -eq 'reported-by-send') ([string]$res.effect)
         Ok 'K4: the cursor was restored after typing into the terminal' ([string]$res.cursorRestored -eq 'true') ([string]$res.cursorRestored)

@@ -1,11 +1,13 @@
 // Type-level consumer smoke test. Compiled with tsc --noEmit by the Phase 2 gate.
 import type {
   WpmAction, WpmArgs, WpmResult, WpmExec, WpmTool, RefusalCode, KeyInputMode, WpmWindow,
-  WpmSnapshotElement, WpmShot, WpmPointSpace, WpmFrameSource,
+  WpmSnapshotElement, WpmShot, WpmPointSpace, WpmFrameSource, WpmEffect, WpmCaretPosition,
+  WpmCaptureBackend, WpmClipboardOp, WpmWindowOp, WpmPolicy,
 } from '../types/index.js';
 import { name, ACTIONS, TOOL_NAME } from '../types/index.js';
 
-const allActions: readonly WpmAction[] = ['windows', 'click', 'type', 'focus', 'status', 'snapshot', 'screenshot', 'preview'];
+const allActions: readonly WpmAction[] = ['windows', 'click', 'type', 'focus', 'status', 'snapshot', 'screenshot', 'preview',
+  'launch', 'clipboard', 'window'];
 const declared: readonly WpmAction[] = ACTIONS;
 void allActions; void declared;
 
@@ -22,8 +24,33 @@ const screenshotAllArgs: WpmArgs = { action: 'screenshot', fullScreen: true, max
 const previewArgs: WpmArgs = { action: 'preview', hwnd: '123', x: 700, y: 500 };
 const imageClickArgs: WpmArgs = { action: 'click', hwnd: '123', x: 350, y: 250, space: 'image', shotId: 'shot-1' };
 const labelClickArgs: WpmArgs = { action: 'click', hwnd: '123', x: 700, y: 500, label: 3, snapId: 'snap-1' };
+// 0.6.0's caret request and the fourth `effect`, exercised by name: a declaration that drops either
+// compiles the older lines happily, and the shipped contract would quietly be a subset of the real one.
+const caretArgs: WpmArgs = { action: 'type', hwnd: '123', text: 'hi', caretPosition: 'end' };
+const caret: WpmCaretPosition = 'start';
+const effect: WpmEffect = 'readback-verified';
+// 0.7.0's desktop surface: three actions, their ops, and the two settings-named refusal codes.
+const launchArgs: WpmArgs = { action: 'launch', target: 'notepad', args: '-n', waitMs: 4000 };
+const clipReadArgs: WpmArgs = { action: 'clipboard', op: 'read', format: 'text' };
+const clipWriteArgs: WpmArgs = { action: 'clipboard', op: 'write', format: 'image', shotId: 'shot-1' };
+const windowMoveArgs: WpmArgs = { action: 'window', hwnd: '123', op: 'move', x: 40, y: 60 };
+const windowResizeArgs: WpmArgs = { action: 'window', hwnd: '123', op: 'resize', width: 800, height: 600 };
+const forced: WpmArgs = { action: 'click', hwnd: '123', x: 1, y: 2, takeover: true, forceUserActive: true };
+const clipOp: WpmClipboardOp = 'write';
+const winOp: WpmWindowOp = 'topmost';
+const policy: WpmPolicy = 'balanced';
+const backend: WpmCaptureBackend = 'bitblt';
+const code15: RefusalCode = 'app_launch_denied';
+const code16: RefusalCode = 'policy_denied';
+const code17: RefusalCode = 'user_active';
+const desktopResult: WpmResult = { action: 'launch', ok: true, pid: 4242, hwnd: '', effect: 'unverified' };
+const shotResult2: WpmResult = { shotId: 'shot-1', captureBackend: 'bitblt', captureNote: 'bitblt-unavailable(x)' };
 void [listArgs, clickArgs, typeArgs, focusArgs, statusArgs, takeoverArgs,
-  snapshotArgs, screenshotArgs, screenshotAllArgs, previewArgs, imageClickArgs, labelClickArgs];
+  snapshotArgs, screenshotArgs, screenshotAllArgs, previewArgs, imageClickArgs, labelClickArgs,
+  caretArgs, clipReadArgs, clipWriteArgs, windowMoveArgs, windowResizeArgs, launchArgs, forced,
+  desktopResult, shotResult2];
+void caret; void effect; void clipOp; void winOp; void policy; void backend;
+void code15; void code16; void code17;
 
 const code: RefusalCode = 'takeover_aborted';
 const code2: RefusalCode = 'stale_ref';
@@ -42,7 +69,7 @@ const shot: WpmShot = {
   file: 'C:/x.png', shotId: 'shot-1',
   screenRect: { left: 0, top: 0, right: 1920, bottom: 1032 },
   imageSize: { width: 1920, height: 1032 },
-  scale: 1, identity: true, frame: 'dwm', dpiAware: true,
+  scale: 1, identity: true, frame: 'dwm', captureBackend: 'bitblt', dpiAware: true,
 };
 const snapResult: WpmResult = { snapId: 'snap-1', elements: [el], count: 1, truncated: false, frameCheck: 'pass', intent: 'x' };
 const shotResult: WpmResult = {

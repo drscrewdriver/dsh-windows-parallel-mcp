@@ -72,8 +72,17 @@ export function checkEngine(src = readFileSync(WIN, 'utf8')) {
   if (!/Remove-Item -LiteralPath \$files\[\$i\]\.FullName/.test(src)) {
     problems.push(`${WIN}: the retention loop no longer deletes the older files`);
   }
-  if (!/ImageFormat\]::Png/.test(src)) {
-    problems.push(`${WIN}: the capture no longer saves as PNG`);
+  // SCOPED TO Get-WpmScreenshot, not the file. Since 0.7.0 the clipboard path also saves a PNG, and an
+  // unscoped `ImageFormat]::Png` test was satisfied by THAT call once the screenshot's own save was
+  // mutated away -- the self-test caught it ("mutation NOT caught, the structural check is vacuous"),
+  // which is the only reason anyone would have. A retention rule over shots must be read over shots.
+  const shotFn = src.slice(src.indexOf('function Get-WpmScreenshot'));
+  const shotBody = shotFn.slice(0, shotFn.indexOf('\nfunction '));
+  if (!/ImageFormat\]::Png/.test(shotBody)) {
+    problems.push(`${WIN}: Get-WpmScreenshot no longer saves as PNG`);
+  }
+  if (!/shotId = 'shot-'/.test(shotBody)) {
+    problems.push(`${WIN}: Get-WpmScreenshot no longer mints the shotId pattern the retention prune keys on`);
   }
   return problems;
 }
@@ -91,7 +100,7 @@ if (selfTest) {
   const mutations = [
     ['retention loop removed', (s) => s.replace(/for \(\$i = \$keepN; \$i -lt \$files\.Count; \$i\+\+\) \{[\s\S]*?\n    \}/, '')],
     ['newest-first ordering removed', (s) => s.replace(/Sort-Object LastWriteTimeUtc -Descending/, '')],
-    ['save format changed away from PNG', (s) => s.replace(/ImageFormat\]::Png/, 'ImageFormat]::Bmp')],
+    ['save format changed away from PNG', (s) => s.replace('$out.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)', '$out.Save($file, [System.Drawing.Imaging.ImageFormat]::Bmp)')],
   ];
   for (const [name, mutate] of mutations) {
     const mutated = mutate(base);

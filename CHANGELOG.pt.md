@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.7.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.7.0, read from the packument, not from a commit date).
+
+> 0.7.0 fecha o buraco de «nem sequer consigo iniciar um programa», acrescenta três ações de desktop e troca a porta binária por UM teto: cada ação declara o degrau mínimo que pode precisar (requiresTier: readonly < quiet < flash < takeover) e o dono define um único policy (padrão balanced). Acima do teto → policy_denied, cujo próximo passo é subir o ajuste, não repetir. launch exige duas chaves que não se implicam (appLaunchAllowed e uma lista appLaunchAllow exata e sem diferença de maiúsculas — vazia = nada inicia, sem curinga nem prefixo); uma recusa não custa nenhuma chamada ao worker. Um processo sem janela responde ok:true, hwnd vazio e detail=window-not-yet (medido: notepad a frio 1348 ms com MainWindowHandle=0). A LEITURA da área de transferência reporta só o comprimento, nunca o conteúdo (limite 64 KB, truncated declarado); a escrita de imagem aceita um shotId. As cinco operações de window são verificadas relendo o estado da própria janela (IsIconic, rect, WS_EX_TOPMOST), e como restore ativa por definição o resultado informa foregroundTaken em vez de esconder. Ações 8 → 11 (quatro cópias sincronizadas; o log do check-types agora lê esses números de tools.json). Se o dono está presente, recusa-se (user_active) em vez de abrir diálogo; forceUserActive:true é a saída explícita e fica registrada na auditoria. Três códigos novos (app_launch_denied, policy_denied, user_active), cada um aponta um ajuste. Registro de auditoria: uma linha JSONL por ação, allow E deny, nunca o conteúdo. Corrigidos dois defeitos reais: Clipboard.Flush() não existe no PowerShell 5.1 (.NET Framework) e um tratador de recusa lia uma chave que seu ramo nunca escreveu. O gate 21 check-policy-table verifica que as duas escadas (JS e PS) são a mesma lista na mesma ordem; check-jsdoc agora verifica se cada arquivo em lib/ está coberto — antes um módulo novo passava sem checagem. Aperto intencional: takeover:true agora exige policy=full além de takeoverAllowed. Gate completo: 21 braços, GATE GREEN ×3. A entrada em inglês é a autoritativa.
+
 ## 0.6.0 — 2026-11-23
 
 > Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).

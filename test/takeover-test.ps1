@@ -83,7 +83,7 @@ try {
 
   # ---- I1/C2: a takeover click moves the pointer (by request) and puts it back -------------
   $c2 = CursorXY; $c2At = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-  $tk = Invoke-WpmAction -Hwnd $hwnd -Action click -X $clickX -Y $clickY -SettleMs 80 -Takeover -TakeoverArmMs 0 -HudDoneMs 0 -TakeoverMaxMs 5000
+  $tk = Invoke-WpmAction -Hwnd $hwnd -Action click -X $clickX -Y $clickY -SettleMs 80 -Takeover -Policy 'full' -ForceUserActive -TakeoverArmMs 0 -HudDoneMs 0 -TakeoverMaxMs 5000
   $c3 = CursorXY; $c3At = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   # How long the external pair of reads spans: the drift assertion is graded only if no physical input
   # landed inside it (see SkipIfOwnerMoved).
@@ -115,7 +115,7 @@ try {
     if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
     Set-Content -LiteralPath $p -Value 'abort' -Encoding ASCII
   } -ArgumentList $latch
-  $ab = Invoke-WpmAction -Hwnd $hwnd -Action click -X $clickX -Y $clickY -SettleMs 80 -Takeover -TakeoverArmMs 2000 -HudDoneMs 0 -TakeoverMaxMs 5000
+  $ab = Invoke-WpmAction -Hwnd $hwnd -Action click -X $clickX -Y $clickY -SettleMs 80 -Takeover -Policy 'full' -ForceUserActive -TakeoverArmMs 2000 -HudDoneMs 0 -TakeoverMaxMs 5000
   $c5 = CursorXY; $c5At = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $c4ElapsedMs = $c5At - $c4At
   [void](Wait-Job $job -Timeout 5); Remove-Job $job -Force -ErrorAction SilentlyContinue
@@ -130,7 +130,11 @@ try {
   Remove-Item -LiteralPath $latch -Force -ErrorAction SilentlyContinue
 
   # ---- I5: injection is refused outside the takeover tier ----------------------------------
-  $inj = Invoke-WpmAction -Hwnd $hwnd -Action type -Text 'x' -KeyInject -SettleMs 80
+  # 0.7.0: `-Policy 'full'` states the precondition the new ceiling adds. Without it this call is
+  # refused with policy_denied, which is correct behaviour but not what this arm is measuring: I5 is
+  # about the keyInject gate, and an arm that silently changed which gate refused it would be testing
+  # the wrong branch while still reporting a matching code.
+  $inj = Invoke-WpmAction -Hwnd $hwnd -Action type -Text 'x' -KeyInject -Policy 'full' -SettleMs 80
   Ok 'I5: keyInput without takeover is refused' ([string]$inj.refusal -eq 'keyinject_unavailable') ([string]$inj.refusal + ' ' + [string]$inj.reason)
 
   # ---- the decision arms -------------------------------------------------------------------

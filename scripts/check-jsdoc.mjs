@@ -25,7 +25,7 @@
 // them out of this config: excluding them makes the importer (config.js) fail with TS2307, which
 // would be a gate reporting a problem it created itself.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { findTsc, typesFor } from './find-tsc.mjs';
 
@@ -61,5 +61,23 @@ if (errors.length) {
   process.exit(1);
 }
 const files = JSON.parse(readFileSync('tsconfig.checkjs.json', 'utf8')).files || [];
-console.log(`PASS jsdoc-types: ${files.length} file(s) under allowJs+checkJs+strict, 0 errors`
+// THE LIST IS EXPLICIT, SO THE LIST CAN FORGET -- and 0.7.0 found this the hard way: lib/policy.js and
+// lib/audit.js were written, imported, and shipped while this gate reported "7 files, 0 errors". A
+// module nobody added to a hand-kept list is a module whose annotations are prose. So: every file in
+// lib/ that the package actually ships must appear in the config, or the gate is red rather than
+// politely incomplete.
+const shipped = readdirSync('lib').filter((f) => /\.(js|mjs)$/.test(f)).map((f) => 'lib/' + f).sort();
+const covered = [...files].sort();
+const missing = shipped.filter((f) => !covered.includes(f));
+if (missing.length) {
+  console.log(`FAIL jsdoc-types: ${missing.length} lib file(s) are not in tsconfig.checkjs.json, so their JSDoc is unchecked: ${missing.join(', ')}`);
+  console.log('Add them to "files" (and fix what they report) -- an annotation nobody checks is a comment.');
+  process.exit(1);
+}
+const stale = covered.filter((f) => !shipped.includes(f));
+if (stale.length) {
+  console.log(`FAIL jsdoc-types: tsconfig.checkjs.json lists ${stale.join(', ')} which is not in lib/ -- a renamed module leaves the gate checking a path that does not exist.`);
+  process.exit(1);
+}
+console.log(`PASS jsdoc-types: ${files.length} file(s) under allowJs+checkJs+strict, 0 errors, and the list covers every shipped lib file`
   + (at ? ` (ambient types via ${at.split(/[\\/]/).slice(-2).join('/')})` : ' (no ambient @types)'));

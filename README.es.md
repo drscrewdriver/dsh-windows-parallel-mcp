@@ -5,7 +5,7 @@
 > Un plugin DSH que permite a un agente controlar **sus propias** ventanas de Windows — silencioso por defecto, visible cuando se pide. Cuando una ventana acepta mensajes de Windows, el foco nunca se pierde. Cuando solo UI Automation puede alcanzarla, el foco sufre un único destello acotado que se revierte automáticamente. Cuando pides explícitamente el modo takeover, el cursor se mueve al punto de acción y siempre se restaura, con un HUD que ofrece tres formas de interrumpir. En cualquier otro caso, rechaza con un código y una razón.
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.6.0** — this document describes the contract as of that version. What
+> **Current release: 0.7.0** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
@@ -13,7 +13,7 @@ on request. Where a window accepts a window message, you never lose focus at all
 exposes UI Automation, you lose focus for one bounded flash that is reversed automatically. Where you
 explicitly ask for the takeover tier, the cursor moves to the point and is always restored, with a
 HUD that can stop it three ways. Everywhere else it refuses, with a code and a reason — never with
-silence: every refusal carries a code from a closed set of fourteen and the next step.
+silence: every refusal carries a code from a closed set of seventeen and the next step.
 
 **The takeover tier defaults off, and that is structural.** The cursor is only ever moved because you
 opened `takeoverAllowed` **and** asked for it on the call (`takeover:true`), so an upgrade cannot
@@ -31,7 +31,7 @@ bundle with a broad tool surface; this one is a single action tool whose entire 
 
 ## What it does
 
-One tool, eight actions:
+One tool, eleven actions:
 
 | action | what it returns |
 |---|---|
@@ -43,6 +43,9 @@ One tool, eight actions:
 | `snapshot` | the accessibility tree as a NUMBERED element table: continuous `label`, control type, name, automation id, screen rect, patterns |
 | `screenshot` | the window rect captured to a PNG, plus the coordinate mapping as data (`screenRect`, `imageSize`, `scale`, `identity`, `frame`, `dpiAware`) |
 | `preview` | the marker drawn at a point, and the element under it reported as TEXT — no picture needed |
+| `launch` | start a whitelisted program; reports the pid, and the window only once it really exists |
+| `clipboard` | read or write the system clipboard — a read reports lengths and never the payload |
+| `window` | minimize / restore / move / resize / topmost ONE named window, verified by reading its state back |
 
 The engine picks the cheapest available door per call:
 
@@ -278,6 +281,93 @@ click. Success is reported as `effect=reported-by-send`, never as "verified". Un
 carries no hardware scancode, which is why a rare scancode-only target would ignore it — documented,
 not a bug.
 
+## Desktop actions: launch, clipboard, window (0.7.0)
+
+Three capabilities that were missing outright — "you cannot even start a program" was the honest answer
+— and none of them is a door action. They choose no channel, cost no tier, and produce no proof window,
+so they live beside `Invoke-WpmAction` rather than inside it, and the door discipline (point ownership,
+the restore table, the proof window) is not widened by any of them.
+
+**`launch` — two switches, neither of which implies the other.** `appLaunchAllowed` opens the
+capability; `appLaunchAllow` lists the exact program names or absolute paths that may run, and an
+**empty list means nothing may launch even with the gate on**. Matching is exact and case-folded: there
+is no wildcard, and `notepad` does not authorise `notepad-helper.exe` — a whitelist that grows by prefix
+is a whitelist that authorises more than it says. A refusal is `app_launch_denied` and is raised before
+any worker request, so a refused launch started nothing (asserted with a request counter in
+`test/plugin-test.mjs` and re-checked inside the engine against the same table). The engine's own
+vocabulary for the window is the interesting part: `Process.Start` returns while the app is still
+loading (measured: `MainWindowHandle=0` for 1348 ms on a cold notepad), so a program that has not
+published a window yet answers `ok:true` with `hwnd=""` and `detail=window-not-yet` — neither a fake
+failure nor a fake readiness. Arguments are passed through as given and written to the audit log,
+because listing a program does not vouch for what it is told to do.
+
+**`clipboard` — the most private read in this product.** What is on the clipboard may be a password or
+a token the owner copied seconds ago, so a text read reports its **length**, its result text never
+contains the payload, the audit line records `op`/`format`/`chars`, and values are capped at 64 KB with
+`truncated` stated rather than silently cut. An image write accepts a `shotId`, so a screenshot can go
+straight into the clipboard without the caller handling pixels; the read-back compares the size the
+clipboard reports against the size the shot recorded. A clipboard holding neither is refused with the
+format names it did find — an empty success would be indistinguishable from "the clipboard is empty".
+
+**`window` — one named window, five ops, each verified by reading the window back.** `IsIconic`,
+`GetWindowRect`, the `WS_EX_TOPMOST` bit — not `ShowWindow`'s return value, because a syscall's answer
+describes the CALL and this product has been burned repeatedly by reporting that as a state. `move` and
+`resize` pass `SWP_NOACTIVATE`, and the result carries `foregroundTaken=true|false` measured on both
+sides of that specific call: `restore` activates by definition (that is what restoring is), and the
+honest answer is to report it, not to hide it or to refuse the op the caller asked for. There is no
+"all windows" op and no `#32770` discovery: acting on a window nobody named is not a convenience.
+
+### One ceiling, eleven actions
+
+The old shape of this problem was a boolean per capability, which does not scale past the number of
+settings anyone will actually read. Instead the two axes are independent:
+
+```
+the action declares the lowest rung it can ever need  (src/schema/tools.json#requiresTier)
+the owner sets one ceiling                             (settings: policy)
+
+readonly  <  quiet  <  flash  <  takeover
+reads        message     bounded-UIA   real cursor / held focus / launch
+door         flash
+```
+
+| `policy` | permits | refuses |
+|---|---|---|
+| `readonly` | `windows`, `status`, `snapshot`, `screenshot`, `preview`, `clipboard` read | every write |
+| `quiet` | + `click` / `type` / `focus` through the message door | the flash tier, `clipboard` write, `window`, `launch` |
+| `balanced` *(default)* | + the bounded-flash tier, `clipboard` write, `window` ops | `takeover:true`, `keyInput:"inject"`, `launch` |
+| `full` | + the takeover tier and `launch` | nothing extra |
+
+Above the ceiling a call is refused with **`policy_denied`** and the reason names both numbers (what the
+action needed, what the policy allows), because the correct next step is a settings change and the wrong
+one is a retry. The gate order is `paused → policy → takeoverAllowed/keyInjectAllowed → launch gate +
+whitelist → idle check → the door table`, and every step in it is tested by making two gates disagree
+about which one spoke (`test/plugin-test.mjs`). Two consequences are worth stating plainly rather than
+leaving to discovery: **`takeover:true` now needs `policy:'full'` as well as `takeoverAllowed`** (0.7.0
+raised the bar for the loudest tier on purpose), and `clipboard`'s halves are graded separately
+(`requiresTierFor`), so a `readonly` owner can still read.
+
+**Idle instead of a dialog.** When the last *physical* input is younger than `policyIdleMs` (default
+3000 ms) and the action needs the takeover tier, it is refused with **`user_active`** and nothing is
+clicked — no popup, no countdown. The upstream design asks the owner to consent by interrupting them;
+an interrupt presented as consent is just a second disturbance. The escape hatch is explicit
+(`forceUserActive:true`), it does not bypass any other gate, and the audit line records `forced:true` so
+an interruption caused on purpose stays distinguishable from one caused by accident. An unattended run
+is never blocked by this: with nobody typing, the age grows past the window and the call goes through.
+
+### The audit log
+
+Every action appends one JSONL line to `%LOCALAPPDATA%\wpm\audit.log` — allow **and** deny, because a
+trail that records only refusals documents the times the guard worked and is silent about the times it
+had nothing to do with. Fields: `ts, action, hwnd, tier, policy, decision, code, userActiveAgeMs,
+effect, latencyMs`, plus `target`/`args` for a launch and `op`/`format`/`chars` for a clipboard call.
+What is deliberately absent is content: no typed text, no clipboard payload — the second copy of a
+secret is the one nobody protects. `auditKeep` (default 2000) bounds the file, pruning oldest-first when
+a write pushes it past budget. An audit that cannot be written is reported (`auditNote=n write(s)
+failed`) rather than swallowed: a log that looks complete and is not is worse than one that admits it
+is missing lines. This is the only artifact that survives a call, and it is the one thing that can
+answer "what did the agent do to this machine" after the fact.
+
 ## What it does not do
 
 - **No mouse injection.** `MOUSEEVENTF_*`, `mouse_event` and `keybd_event` are banned in every
@@ -314,9 +404,10 @@ degradation.
 ## Typed surface
 
 `types/index.d.ts` is written by hand, not emitted from an implementation. It covers the whole
-contract: the eight actions, every argument including the takeover fields, the image-space / label
-surface and 0.6.0's `caretPosition`, all fourteen refusal codes as a closed union, and `effect` as its
-own four-value union (`WpmEffect`) beside `WpmCaptureBackend` and `WpmFrameSource`.
+contract: the eleven actions, every argument including the takeover fields, the image-space / label
+surface, 0.6.0's `caretPosition` and 0.7.0's `target`/`op`/`format`/`forceUserActive`, all seventeen
+refusal codes as a closed union, and `effect` as its own four-value union (`WpmEffect`) beside
+`WpmCaptureBackend`, `WpmClipboardOp`, `WpmWindowOp`, `WpmPolicy` and `WpmFrameSource`.
 
 Its wiring is measured in both resolution modes a consumer can use, rather than assumed from the
 presence of a file:
@@ -351,6 +442,11 @@ when one is present, and the gate reports a named SKIP rather than a red when on
 | `snapshotMaxElements` | `300` | cap on elements per snapshot (1–5000); a tighter cap is a smaller frame for a deciding subagent |
 | `screenshotMaxWidth` | `0` | downscale captures to this width; `0` means no scaling and `scale=1` — a resized image is a different coordinate system, so it is never chosen silently |
 | `shotsKeep` | `10` | how many PNGs stay in `%LOCALAPPDATA%\wpm\shots`; older files are deleted after each capture |
+| `policy` | `balanced` | the ceiling over all eleven actions: `readonly` < `quiet` < `balanced` < `full`. Above it a call is refused with `policy_denied`, whose next step is to raise THIS setting and not to retry. An unrecognizable value falls back to `balanced`, never to `full` |
+| `policyIdleMs` | `3000` | how recently a physical input counts as "the owner is here". A takeover-tier call then refuses with `user_active` and opens no dialog; `0` disables the check |
+| `appLaunchAllowed` | `false` | allow `action=launch` at all. Independent of `takeoverAllowed`: being allowed to move a pointer is not being allowed to start a program |
+| `appLaunchAllow` | `[]` | the launch whitelist — exact names or absolute paths, matched case-insensitively and in full. Empty means nothing may launch even with the gate on; no wildcard, no prefix |
+| `auditKeep` | `2000` | how many lines `%LOCALAPPDATA%\wpm\audit.log` holds before the oldest are pruned |
 
 ## What measurement established
 
@@ -438,6 +534,32 @@ unmeasured end-to-end and is stated as such in [docs/refusals.md](docs/refusals.
   `EntryPointNotFoundException` on first use and surfaced as `action_failed`. No test in the repository
   exercised `replace:true` through the message door, which is why the fix ships with an arm that does
   (`test/readback-truth.mjs` A1). Found by running the import instead of trusting its name.
+
+### 0.7.0's measurements
+
+- **A cold `Process.Start` has no window for over a second** — notepad: pid present,
+  `MainWindowHandle=0`, **1348 ms**, and the window only reachable by polling the pid. Hence
+  `waitMs`/`window-not-yet` rather than an hwnd claim at return time.
+- **The STA clipboard works in the worker and is not instant** — text write+read identical, first call
+  **138 ms**; `SetDataObject`/`GetDataObject` for images (40×20 verified). `Clipboard.Flush()` does NOT
+  exist on Windows PowerShell 5.1's runtime (.NET Framework): the first version of this branch threw
+  "Clipboard does not contain a method named 'Flush'", which is a method present in the documentation
+  people read and absent from the platform the product targets. `SetDataObject($v, $true)` is the
+  supported way to make the data outlive the process.
+- **`SW_RESTORE` activates.** Measured around a restore on a real notepad window:
+  `foregroundBefore=<other> foregroundAfter=<target>`. Reported as `foregroundTaken=true` on that call
+  instead of being attributed to something else; `move`/`resize`/`topmost` measured
+  `foregroundTaken=false` with `SWP_NOACTIVATE`.
+- **The whitelist is only a whitelist if it is exact.** `notepad` against `notepad-helper.exe`: a
+  prefix or substring rule authorises the second one, so membership is a case-folded full-string test
+  and `test/plugin-test.mjs` asserts the refusal for an unlisted name while the gate is on.
+- **The refusal vocabulary is unchanged in shape by `requiresTier`** — a rung comparison is arithmetic
+  over one ordered list, so the cost of an action's classification is one number, not one new code per
+  action. Three codes were added for the whole batch (`app_launch_denied`, `policy_denied`,
+  `user_active`), each naming a setting rather than a symptom.
+- `Check-no-cursor-control` is still green with the same two whitelisted primitive uses and an
+  unchanged whitelist file list: adding `launch`/`window` did not open a door to `MOUSEEVENTF_*`,
+  `mouse_event` or `keybd_event`.
 
 ## Verifying the copy you actually installed
 

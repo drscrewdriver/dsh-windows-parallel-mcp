@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.7.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.7.0, read from the packument, not from a commit date).
+
+> 0.7.0 은 「프로그램 하나 켜지 못한다」는 구멍을 메우고 세 개의 데스크톱 동작을 추가하면서, 이진 권한 게이트를 하나의 천장으로 바꿨다. 각 액션은 가장 낮은 필요 단(requiresTier: readonly < quiet < flash < takeover)을 선언하고 소유자는 policy 하나만 정한다(기본 balanced). 천장 초과면 policy_denied — 다음 단계는 재시도가 아니라 설정 상향이다. launch 는 서로 암시하지 않는 두 스위치를 요구한다(appLaunchAllowed 와, 완전 일치·대소문자 무시의 appLaunchAllow. 비어 있으면 아무것도 실행 불가, 와일드카드·접두 일치 없음). 거절 시 worker 요청 0. 프로세스는 떴는데 창이 없으면 ok:true + hwnd 공백 + detail=window-not-yet(실측: 차가운 notepad 는 1348ms 동안 MainWindowHandle=0). clipboard 읽기는 길이만 알리고 본문을 절대 싣지 않으며(64KB 상한, truncated 명시), 이미지 쓰기는 shotId 를 직접 받는다. window 다섯 조작은 창 스스로의 상태(IsIconic/rect/WS_EX_TOPMOST)를 다시 읽어 검증하고, restore 은 정의상 포그라운드를 잡으므로 숨기지 말고 foregroundTaken 으로 보고한다. 액션 수 8→11(계약 네 곳을 동기화하고 check-types 로그를 tools.json 에서 읽는다). 주인이 자리에 있으면 대화 상자 대신 user_active 로 거절하고, 탈출구 forceUserActive:true 는 감사 로그에 남는다. 새 코드 15/16/17(app_launch_denied/policy_denied/user_active)은 모두 다음 단계로 설정을 지목한다. 감사 로그는 액션마다 한 줄, allow 와 deny 모두 적되 내용은 결코 적지 않는다. PS 5.1(.NET Framework) 에 없는 Clipboard.Flush() 와, 분기가 쓰지 않은 키를 읽던 결함을 실제로 고쳤다. 새 게이트 21 check-policy-table 은 JS·PS 두 사다리가 같은 순서임을 검증하고, check-jsdoc 은 lib/ 모든 파일이 검사 대상에 있음을 검증한다(이전엔 조용히 빠졌다). 의도적으로 조인 부분: takeover:true 는 takeoverAllowed 에 더해 policy=full 을 요구한다. 전체 게이트 21 팔 ×3 GATE GREEN. 권위는 영어본.
+
 ## 0.6.0 — 2026-11-23
 
 > Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).

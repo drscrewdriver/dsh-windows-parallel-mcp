@@ -1,9 +1,20 @@
 // Type declarations for dsh-windows-parallel-mcp (public API surface).
-// Mirrors lib/index.js + lib/host-tools.js + src/schema/tools.json (v0.6.0).
+// Mirrors lib/index.js + lib/host-tools.js + src/schema/tools.json (v0.7.0).
 
 export type WpmAction =
   | 'windows' | 'click' | 'type' | 'focus' | 'status'
-  | 'snapshot' | 'screenshot' | 'preview';
+  | 'snapshot' | 'screenshot' | 'preview'
+  // 0.7.0: three desktop actions. They are gated by SETTINGS, not by the target's doors -- which is why
+  // they take no channel, cost no tier of their own, and produce no proof window.
+  | 'launch' | 'clipboard' | 'window';
+
+/** clipboard's `op`. */
+export type WpmClipboardOp = 'read' | 'write';
+/** window's `op`. There is no 'all windows' value, and that is the contract, not an omission. */
+export type WpmWindowOp = 'minimize' | 'restore' | 'move' | 'resize' | 'topmost';
+
+/** The single authorization ceiling in settings; lib/policy.js holds the ladder it is read against. */
+export type WpmPolicy = 'readonly' | 'quiet' | 'balanced' | 'full';
 
 /**
  * WHO REPORTED THE SUCCESS. The first three name a messenger, not a degree of confidence (see the
@@ -23,7 +34,10 @@ export type RefusalCode =
   | 'no_hwnd' | 'paused' | 'elevated_target' | 'unreachable'
   | 'uia_tree_empty' | 'uia_probe_failed' | 'terminal_no_door' | 'needs_facts'
   | 'takeover_unavailable' | 'keyinject_unavailable' | 'action_failed'
-  | 'restore_failed' | 'takeover_aborted' | 'stale_ref';
+  | 'restore_failed' | 'takeover_aborted' | 'stale_ref'
+  // 0.7.0. What separates these three from the fourteen above is the NEXT STEP: each names a SETTING,
+  // so retrying the same call is the wrong response and changing the setting is the right one.
+  | 'app_launch_denied' | 'policy_denied' | 'user_active';
 
 export type KeyInputMode = 'none' | 'inject';
 
@@ -95,6 +109,17 @@ export interface WpmArgs {
   intent?: string;
   fullScreen?: boolean;
   maxWidth?: number;
+  // ---- 0.7.0: launch / clipboard / window ----
+  target?: string;
+  args?: string;
+  waitMs?: number;
+  op?: WpmClipboardOp | WpmWindowOp;
+  /** clipboard only: which format to read or write. */
+  format?: 'text' | 'image';
+  width?: number;
+  height?: number;
+  /** The caller's explicit override of the idle check; recorded in the audit log as `forced`. */
+  forceUserActive?: boolean;
 }
 
 export interface WpmResult {
@@ -132,6 +157,13 @@ export interface WpmResult {
   dpiAware?: boolean;
   // ---- preview ----
   preview?: { x: number; y: number; name: string; controlType: string; automationId: string };
+  // ---- 0.7.0 desktop results ----
+  pid?: number;
+  processName?: string;
+  waitedMs?: number;
+  clipFormat?: 'text' | 'image';
+  clipId?: string;
+  resultChars?: number;
   [key: string]: unknown;
 }
 

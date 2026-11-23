@@ -186,7 +186,16 @@ function Invoke-WpmAction {
     # selection at 0,0 and the character lands at the FRONT (findings 8.2). The UIA `value` channel
     # replaces the whole value and has no caret to place, so it reports caretIgnored rather than
     # pretending the request was honoured.
-    [ValidateSet('idle', 'start', 'end')][string]$CaretPosition = 'idle'
+    [ValidateSet('idle', 'start', 'end')][string]$CaretPosition = 'idle',
+    # ---- 0.7.0 authorization, measured here because only this process can see the desktop -------
+    # `Policy` and `RequiredTier` come from the host (settings + tools.json). The IDLE CHECK cannot come
+    # from the host: last-input age is a GetLastInputInfo reading, and a host that wanted it before the
+    # worker call would have to make a worker call. So the ceiling is enforced twice (host pre-worker,
+    # engine here) and idle is enforced once, at the only place the number exists.
+    [string]$Policy = 'balanced',
+    [string]$RequiredTier = 'quiet',
+    [int]$PolicyIdleMs = 3000,
+    [switch]$ForceUserActive
   )
   $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $h = [IntPtr][int64]$Hwnd
@@ -454,11 +463,32 @@ function Invoke-WpmAction {
   $facts.keyInjectAllowed = [bool]$KeyInject     # the host gate already stripped the field when off
   $facts.hudReady = $false
   $facts.foregroundIsTarget = $false
+  # 0.7.0: the rung this call actually needs. An explicit takeover request outranks the action's declared
+  # minimum because moving the real cursor IS the higher permission; that escalation has to be visible to
+  # the policy and idle checks or `policy:'quiet'` would be bypassed by a single flag.
+  $facts.policy = $Policy
+  $facts.requiredTier = $(if ($Takeover -or $KeyInject) { 'takeover' } else { $RequiredTier })
+  $facts.forceUserActive = [bool]$ForceUserActive
+  $facts.policyIdleMs = $PolicyIdleMs
+  # Measured NOW, not carried from the earlier probe: an age read before the HUD came up would describe a
+  # desktop that no longer exists, and the whole point of this fact is "was the owner busy a moment ago".
+  $facts.lastInputAgeMs = [WpmWin]::LastInputAgeMs()
   $preFacts = $facts.Clone()
   $preFacts.takeoverRequested = $false
   $preFacts.keyInjectRequested = $false
+  # THE ESCALATION GOES BACK OUT TOO. `requiredTier` was raised to 'takeover' a few lines above because
+  # this call asks for the takeover tier; the pre-pass exists precisely to ask "what does the ACTION
+  # itself need", so leaving the escalated rung in place made a `keyInput:'inject'`-only call answer
+  # `user_active` (an idle refusal) instead of the `keyinject_unavailable` the arm asserts. A clone that
+  # clears the request flags must clear what those flags implied, or the pre-pass measures a different
+  # call than the one it claims to be checking.
+  $preFacts.requiredTier = $RequiredTier
   $pre = Get-WpmChannelDecision $preFacts
-  if ($pre.channel -eq 'refuse' -and (@('paused', 'no_hwnd', 'elevated_target') -contains $pre.refusal)) {
+  # THE CHEAP DISQUALIFIERS RUN BEFORE ANY WINDOW IS CREATED. 0.7.0 adds policy_denied and user_active to
+  # this list rather than letting them be discovered later: a takeover request that the owner's settings
+  # exclude must not flash a HUD at them on its way to saying no -- the HUD is itself the disturbance the
+  # refusal exists to prevent.
+  if ($pre.channel -eq 'refuse' -and (@('paused', 'no_hwnd', 'elevated_target', 'policy_denied', 'user_active') -contains $pre.refusal)) {
     $result.refusal = $pre.refusal; $result.reason = $pre.reason
     $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
     return $result
@@ -935,5 +965,222 @@ function Invoke-WpmAction {
   $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
   $result.fgBefore = $entry.fgHwnd
   $result.fgNow = [WpmWin]::Fg()
+  return $result
+}
+
+# ==================================================================================================
+# 0.7.0: the three desktop actions that are NOT door actions.
+# ==================================================================================================
+
+function Invoke-WpmDesktopAction {
+  <#
+    launch / clipboard / window live beside Invoke-WpmAction, not inside it, and that separation is the
+    point: a door action chooses a channel, costs a tier, takes and returns a focus, and is judged by a
+    proof window. A window move or a clipboard write does none of those things, and routing them through
+    the door table would either force them into a refusal code they do not deserve or make the table
+    answer for capabilities it never measured.
+
+    WHAT THEY STILL DO: every one of them is verified by reading the STATE back -- `IsIconic`, the rect,
+    the ex-style, the clipboard's own content -- because the rule this product has been bitten by is that
+    a syscall's return value describes the CALL. So `effect` uses the same four values and the same rule:
+    `readback-verified` only when the read agrees, `unverified` otherwise, and the disagreement or the
+    reason travels in `detail`. No refusal code was added for this batch either: `launch` with the gate
+    off, a window with no hwnd, and a clipboard holding an unexpected format are all answered by the host
+    gate or by the existing `no_hwnd` / `action_failed` vocabulary.
+  #>
+  param(
+    [Parameter(Mandatory)][ValidateSet('launch', 'clipboard', 'window')][string]$Action,
+    [string]$Hwnd = '',
+    [string]$Target = '',
+    [object]$Arguments = $null,
+    [int]$WaitMs = 3000,
+    [string]$Op = '',
+    [string]$Format = 'text',
+    [string]$Text = '',
+    [string]$ShotId = '',
+    [int]$X = 0,
+    [int]$Y = 0,
+    [int]$Width = 0,
+    [int]$Height = 0,
+    [int]$MaxChars = 65536,
+    # ---- 0.7.0 authorization. The host gate runs first and costs zero worker requests; these are the
+    # engine's own second line, checked against the same table in decide.ps1 so the two processes cannot
+    # disagree about what the owner permitted.
+    [string]$Policy = 'balanced',
+    [int]$PolicyIdleMs = 3000,
+    [switch]$ForceUserActive,
+    [bool]$AppLaunchAllowed = $false,
+    [string[]]$AppLaunchAllow = @()
+  )
+  $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $result = @{ ok = $false; action = $Action; hwnd = $Hwnd; refusal = ''; reason = ''; detail = ''
+    effect = 'unverified'; latencyMs = 0 }
+
+  if ($Action -eq 'launch') {
+    # The engine re-runs the gate and the whitelist through the SAME table the host used. A permission
+    # that lives in only one of the two processes is a permission that can be reached around by calling
+    # the other, and `launch` is the one action where that distinction has consequences.
+    $launchFacts = New-WpmFacts -Hwnd '' -Action launch -FactsMeasured $true `
+      -Policy $Policy -RequiredTier 'takeover' -PolicyIdleMs $PolicyIdleMs `
+      -ForceUserActive:([bool]$ForceUserActive) -LastInputAgeMs ([WpmWin]::LastInputAgeMs()) `
+      -AppLaunchAllowed:$AppLaunchAllowed -AppLaunchAllow $AppLaunchAllow -LaunchTarget $Target
+    $ld = Get-WpmChannelDecision $launchFacts
+    if ($ld.channel -eq 'refuse') {
+      $result.refusal = [string]$ld.refusal; $result.reason = [string]$ld.reason
+      $result.detail = "launch gate: allowed=$AppLaunchAllowed whitelist=$(@($AppLaunchAllow).Count) name(s)"
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    $argv = @()
+    if ($Arguments -is [array]) { $argv = @($Arguments | ForEach-Object { [string]$_ }) }
+    elseif ($Arguments -is [string] -and $Arguments) { $argv = @($Arguments) }
+    $s = Start-WpmApp -Target $Target -Arguments $argv
+    if (-not $s.ok) {
+      $result.refusal = 'action_failed'; $result.reason = [string]$s.reason
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    $result.pid = [int]$s.pid
+    $result.processName = [string]$s.name
+    $result.target = [string]$s.target
+    # The window is waited for only when the caller asked to address one. hwnd=0 after a successful
+    # launch is a REPORTED state ('window-not-yet'), never a failure -- see Wait-WpmAppWindow.
+    if ($WaitMs -gt 0) {
+      $w = Wait-WpmAppWindow -ProcessId ([int]$s.pid) -WaitMs $WaitMs
+      $result.hwnd = [string]$w.hwnd
+      $result.waitedMs = [int]$w.waitedMs
+      if ($w.hwnd) {
+        $result.ok = $true
+        $result.effect = 'readback-verified'
+        $result.detail = "launched pid=$($s.pid) hwnd=$($w.hwnd) title=$($w.title)"
+      } elseif ($w.ContainsKey('detail')) {
+        # ContainsKey on purpose: Wait-WpmAppWindow answers THREE different shapes -- window found, no
+        # window yet (carries detail=window-not-yet and a note), and the process is gone (carries a
+        # reason and no detail at all). Reading a key that a branch never set is a StrictMode throw, and a
+        # throw inside the handler for a started-but-windowless process would report `action_failed` on
+        # a program that is running fine -- the exact overstatement this engine exists to avoid.
+        $result.ok = $true
+        $result.detail = "launched pid=$($s.pid) " + [string]$w.detail + " waitedMs=$($w.waitedMs)"
+        if ($w.ContainsKey('note')) { $result.note = [string]$w.note }
+      } else {
+        $result.refusal = 'action_failed'
+        $result.reason = [string]$w.reason
+        $result.detail = "launched pid=$($s.pid) but no window could be observed"
+      }
+    } else {
+      $result.ok = $true
+      $result.detail = "launched pid=$($s.pid) window=not-asked (waitMs=0)"
+    }
+    $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+    return $result
+  }
+
+  if ($Action -eq 'clipboard') {
+    if ($Op -eq 'read') {
+      $c = Get-WpmClipboard -Format $Format -MaxChars $MaxChars
+      if (-not $c.ok) {
+        $result.refusal = 'action_failed'; $result.reason = [string]$c.reason
+        # ContainsKey before reading: these failure paths return DIFFERENT key sets by design (a format
+        # miss carries the names it found, an exception does not), and under Set-StrictMode 2.0 reading a
+        # key that is simply absent throws -- turning a documented refusal into a crash inside the
+        # refusal handler, which is the failure mode the first run of this branch produced.
+        if ($c.ContainsKey('formats') -and $c.formats) { $result.detail = 'formats=' + ($c.formats -join ',') }
+        $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+        return $result
+      }
+      $result.ok = $true
+      $result.clipFormat = [string]$c.format
+      if ($c.format -eq 'text') {
+        # The CONTENT is deliberately not put into `detail`: the result text is written into a model's
+        # context and an audit line, and the clipboard is exactly the place where that can carry a token
+        # (R8). Length and the truncation flag are enough to decide what to do next.
+        $result.chars = [int]$c.chars
+        $result.truncated = [bool]$c.truncated
+        $result.effect = 'readback-verified'
+        $result.detail = "clipboard=read format=text chars=$($c.chars)" + $(if ($c.truncated) { " truncated=$($MaxChars)" } else { '' })
+      } else {
+        $result.file = [string]$c.file
+        $result.clipId = [string]$c.clipId
+        $result.imageSize = "$($c.width)x$($c.height)"
+        $result.effect = 'readback-verified'
+        $result.detail = "clipboard=read format=image file=$($c.file) size=$($c.width)x$($c.height)"
+      }
+    } elseif ($Op -eq 'write') {
+      $c = Set-WpmClipboard -Format $Format -Text $Text -ShotId $ShotId
+      if (-not $c.ok) {
+        $result.refusal = $(if ($c.ContainsKey('stale') -and $c.stale) { 'stale_ref' } else { 'action_failed' })
+        $result.reason = [string]$c.reason
+        $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+        return $result
+      }
+      $result.ok = $true
+      $result.clipFormat = [string]$c.format
+      if ($c.format -eq 'text') {
+        $result.chars = [int]$c.chars
+        # The read-back is a LENGTH comparison, and the value itself is not echoed: same reason as above.
+        $result.readbackChars = [int]$c.readbackChars
+        $result.effect = $(if ($c.readbackMatches) { 'readback-verified' } else { 'unverified' })
+        $result.detail = "clipboard=write format=text chars=$($c.chars) readbackChars=$($c.readbackChars)" +
+          $(if ($c.readbackMatches) { '' } else { ' readbackMismatch=true' })
+      } else {
+        $result.readbackSize = "$($c.readbackWidth)x$($c.readbackHeight)"
+        # The image read-back is a SIZE comparison against the shot that was pushed in: the pixels
+        # themselves cannot be hashed (two reads of a live screen differ, findings 5.1) and the shot's own
+        # dimensions are the fact the caller can act on.
+        $dimsMatch = ($c.readbackWidth -eq $c.width) -and ($c.readbackHeight -eq $c.height)
+        $result.effect = $(if ($dimsMatch) { 'readback-verified' } else { 'unverified' })
+        $result.detail = "clipboard=write format=image shotId=$($c.shotId) asked=$($c.width)x$($c.height) readback=$($c.readbackWidth)x$($c.readbackHeight)" +
+          $(if ($dimsMatch) { '' } else { ' readbackMismatch=true' })
+      }
+    } else {
+      $result.refusal = 'action_failed'; $result.reason = "clipboard needs op='read' or op='write'"
+      $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+      return $result
+    }
+    $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+    return $result
+  }
+
+  # ---- window ------------------------------------------------------------------
+  if (-not $Hwnd) {
+    $result.refusal = 'no_hwnd'; $result.reason = 'window acts on one named window; there is no "all windows" op'
+    $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+    return $result
+  }
+  $fgBeforeOp = [WpmWin]::Fg()
+  $w = Invoke-WpmWindowOp -Hwnd ([IntPtr][int64]$Hwnd) -Op $Op -X $X -Y $Y -Width $Width -Height $Height
+  $fgAfterOp = [WpmWin]::Fg()
+  # Only the 'hwnd is not a live window' branch carries a refusal code; the others answer ok/false with a
+  # reason. Under StrictMode an unguarded read of a key that branch never sets would throw inside the
+  # handler, so presence is tested rather than assumed.
+  if ($w.ContainsKey('refusal') -and $w.refusal) { $result.refusal = [string]$w.refusal }
+  $result.ok = [bool]$w.ok
+  $result.reason = [string]$w.reason
+  $bits = @("window=$Op")
+  foreach ($k in @('iconic', 'called', 'asked', 'size', 'rect', 'before', 'topmost', 'exStyle', 'activated')) {
+    if ($w.ContainsKey($k)) {
+      # Lower-cased deliberately: every other boolean this engine puts into `detail` reads
+      # disabled=true / focusMoved=false / verified=true, and a PowerShell `True` in the same sentence is
+      # how a field ends up being parsed two ways by two consumers.
+      $val = $w[$k]
+      if ($val -is [bool]) { $val = $val.ToString().ToLower() }
+      $bits += "$k=$val"
+    }
+  }
+  $bits += $(if ($w.ok) { 'verified=true' } else { 'verified=false' })
+  # DID THE OWNER LOSE THE FOREGROUND TO THIS CALL -- measured on both sides of it, because
+  # `restore` activates by definition and a window op that quietly took the focus while reporting only a
+  # size change is the failure shape this product keeps meeting. Saying it is not the same as refusing
+  # it: the caller asked for the window to come back, and coming back is what restoring means.
+  $fgTaken = ($fgBeforeOp -ne $fgAfterOp) -and ($fgAfterOp -eq $Hwnd)
+  $bits += "foregroundTaken=$($fgTaken.ToString().ToLower())"
+  if ($fgTaken) {
+    $bits += "foregroundBefore=$fgBeforeOp foregroundAfter=$fgAfterOp"
+  }
+  $result.detail = ($bits -join ' ')
+  $result.foregroundTaken = $fgTaken
+  # The window's own answer is the read-back, so the effect follows it directly.
+  $result.effect = $(if ($w.ok) { 'readback-verified' } else { 'unverified' })
+  $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
   return $result
 }

@@ -1054,6 +1054,272 @@ function Read-WpmControlText {
 }
 
 # ==================================================================================================
+# 0.7.0 DESKTOP CAPABILITIES: launch, clipboard, window. Three actions the product could not do
+# before, and none of them is a door: they take no target's message queue, choose no channel, and
+# produce no proof window -- so they live BESIDE Invoke-WpmAction rather than inside it. The door
+# discipline (point ownership, the restore table, the proof window) is not widened by any of this.
+# ==================================================================================================
+
+function Start-WpmApp {
+  <#
+    Launch a program. The HOST half is what decides whether this may run at all (appLaunchAllowed and
+    the exact-name whitelist, lib/index.js); by the time this function is reached the decision is made,
+    and this file reports only what the OS did.
+
+    Why the return is a pid and NOT a window handle: measured, `Process.Start` returns while the app is
+    still loading and MainWindowHandle is 0 (1348 ms cold for notepad). A launch that claimed a window it
+    does not have yet would send every follow-up action to hwnd=0, so the window is waited for
+    separately, by Wait-WpmAppWindow, and reported honestly when it has not appeared.
+  #>
+  param([string]$Target, [string[]]$Arguments = @(), [string]$WorkingDirectory = '')
+  if (-not $Target) { return @{ ok = $false; reason = 'launch needs a target: an executable path or a resolvable program name' } }
+  try {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $Target
+    $psi.UseShellExecute = $true              # the documented way a shell start resolves .exe/app paths
+    if ($Arguments -and $Arguments.Count -gt 0) {
+      $psi.Arguments = ($Arguments -join ' ')
+      # The arguments are joined into one command line here. That is what the OS takes; the AUDIT logs
+      # them as given, because R1 in the plan says the whitelist cannot make parameters safe, only the
+      # record can make a bad one reviewable.
+    }
+    if ($WorkingDirectory) { $psi.WorkingDirectory = $WorkingDirectory }
+    $p = [System.Diagnostics.Process]::Start($psi)
+    if (-not $p) { return @{ ok = $false; reason = 'the OS started nothing for this target' } }
+    return @{ ok = $true; pid = [int]$p.Id; name = [string]$p.ProcessName;
+      fileName = [string]$p.MainModule.FileName; target = $Target }
+  } catch {
+    # Access denied, missing file, bad working directory. Reported as a failure of THIS action, with the
+    # OS's own sentence attached -- not folded into an engine refusal code it does not own.
+    return @{ ok = $false; reason = 'start failed: ' + $_.Exception.Message }
+  }
+}
+
+function Wait-WpmAppWindow {
+  <#
+    Poll for the process's first real top-level window, up to `WaitMs`. Two answers, both honest:
+      found    -> { ok=true; hwnd=...; waitedMs }
+      not yet  -> { ok=true; hwnd=''; detail='window-not-yet'; waitedMs } -- NOT a failure. The program
+                  did start; pretending otherwise would make a slow launch look like a dead one, and
+                  pretending the window exists would send the next action to nothing.
+  #>
+  param([int]$ProcessId, [int]$WaitMs = 3000)
+  $budget = [Math]::Max(0, [Math]::Min(30000, $WaitMs))
+  $at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $deadline = $at + $budget
+  while ($true) {
+    $p = $null
+    try { $p = Get-Process -Id $ProcessId -ErrorAction Stop } catch { $p = $null }
+    if (-not $p) {
+      return @{ ok = $false; hwnd = ''; reason = "process $ProcessId is gone"; waitedMs = [int]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $at) }
+    }
+    $h = [long]$p.MainWindowHandle
+    # Refresh: MainWindowHandle is cached on the Process object, and the whole reason this loop exists
+    # is that the first read is 0.
+    if ($h -le 0) { try { $p.Refresh() } catch { }; $h = [long]$p.MainWindowHandle }
+    if ($h -gt 0) {
+      return @{ ok = $true; hwnd = $h.ToString(); waitedMs = [int]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $at);
+        title = [string]$p.MainWindowTitle }
+    }
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ($now -ge $deadline) {
+      return @{ ok = $true; hwnd = ''; detail = 'window-not-yet'; waitedMs = [int]($now - $at);
+        note = "the process is running but has published no top-level window within $budget ms; keep polling, or address it by pid"
+      }
+    }
+    Start-Sleep -Milliseconds 50
+  }
+}
+
+function Get-WpmClipboard {
+  <#
+    Read the SYSTEM clipboard. R8 in the plan is the reason this is written carefully: what is in the
+    clipboard may be a password or a token the owner copied seconds ago. So:
+      * text is capped at 64 KB and a longer payload is TRUNCATED AND SAYING so (`truncated=true`),
+        rather than either silently cutting or dumping the whole thing into a model's context;
+      * the audit records op/format/length, never the content (lib/index.js owns the audit line);
+      * a non-text, non-image clipboard answers `unsupported-format` with the format names it did find
+        -- an empty success would be indistinguishable from "the clipboard is empty".
+    Requires STA, which the worker already runs under (`powershell.exe -STA`); measured in findings 5.2.
+  #>
+  param([string]$Format = 'text', [int]$MaxChars = 65536)
+  Add-Type -AssemblyName System.Windows.Forms
+  $fmt = if ($Format -eq 'image') { 'image' } else { 'text' }
+  try {
+    if ($fmt -eq 'text') {
+      if (-not [System.Windows.Forms.Clipboard]::ContainsText()) {
+        return @{ ok = $false; reason = 'the clipboard holds no text'; formats = (Get-WpmClipboardFormats) }
+      }
+      $t = [System.Windows.Forms.Clipboard]::GetText()
+      if ($null -eq $t) { $t = '' }
+      $cap = [Math]::Max(1, $MaxChars)
+      $truncated = $t.Length -gt $cap
+      return @{ ok = $true; format = 'text'; chars = [int]$t.Length; text = $(if ($truncated) { $t.Substring(0, $cap) } else { $t }); truncated = $truncated }
+    }
+    if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) {
+      return @{ ok = $false; reason = 'the clipboard holds no image'; formats = (Get-WpmClipboardFormats) }
+    }
+    $img = [System.Windows.Forms.Clipboard]::GetImage()
+    if (-not $img) { return @{ ok = $false; reason = 'the clipboard claimed an image and returned none' } }
+    $dir = Join-Path (Get-WpmDataDir) 'clipboard'
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $id = 'clip-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $file = Join-Path $dir ($id + '.png')
+    $img.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+    $w = [int]$img.Width; $h = [int]$img.Height
+    $img.Dispose()
+    return @{ ok = $true; format = 'image'; file = $file; clipId = $id; width = $w; height = $h }
+  } catch {
+    # The clipboard is owned by whatever app last touched it and can be locked; that is a transient
+    # state of the desktop, reported as a failure of this action with the OS's sentence attached.
+    return @{ ok = $false; reason = 'clipboard read failed: ' + $_.Exception.Message }
+  }
+}
+
+function Get-WpmClipboardFormats {
+  # The format NAMES, so a refusal can say what IS there instead of only what is not.
+  try {
+    $names = @([System.Windows.Forms.Clipboard]::GetDataObject().GetFormats())
+    return @($names | ForEach-Object { [string]$_ } | Select-Object -First 12)
+  } catch { return @() }
+}
+
+function Set-WpmClipboard {
+  <#
+    Write the clipboard. `shotId` is accepted for an image so a screenshot can be pushed into the
+    clipboard without the caller ever handling the pixels -- the same "the engine does the arithmetic"
+    stance as space:"image" for a click. SetDataObject($true) flushes the data so it survives this
+    process, which is the documented difference between a clipboard write and a clipboard promise.
+  #>
+  param([string]$Format = 'text', [string]$Text = '', [string]$ShotId = '')
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+  $fmt = if ($Format -eq 'image') { 'image' } else { 'text' }
+  try {
+    if ($fmt -eq 'text') {
+      if (-not $Text) { return @{ ok = $false; reason = 'clipboard write needs text; an empty write is indistinguishable from a clipboard the owner already cleared' } }
+      [System.Windows.Forms.Clipboard]::Clear()
+      # SetDataObject($value, $true), NOT Flush(): `Flush` is a .NET Core API and this engine's floor is
+      # Windows PowerShell 5.1 (= .NET Framework 4.x), where the call does not exist. The first version
+      # of this branch threw "Clipboard does not contain a method named 'Flush'" -- a method that exists
+      # in the documentation people read and not in the runtime the product targets. The second argument
+      # is what makes the data survive this process, which is the whole behaviour being asked for.
+      [System.Windows.Forms.Clipboard]::SetDataObject($Text, $true)
+      $back = ''
+      try { $back = [string][System.Windows.Forms.Clipboard]::GetText() } catch { }
+      return @{ ok = $true; format = 'text'; chars = [int]$Text.Length; readbackChars = [int]$back.Length;
+        readbackMatches = ($back -ceq $Text) }
+    }
+    if (-not $ShotId) { return @{ ok = $false; reason = 'clipboard image write needs a shotId (the screenshot to put there) or a file' } }
+    if (-not $script:WpmShots.ContainsKey($ShotId)) {
+      return @{ ok = $false; stale = $true; reason = "shotId '$ShotId' is not a screenshot this worker still holds" }
+    }
+    $file = [string]$script:WpmShots[$ShotId].file
+    if (-not (Test-Path -LiteralPath $file)) { return @{ ok = $false; reason = "the shot's PNG is no longer on disk: $file" } }
+    # The shot's own recorded size travels along, so the engine can compare what the clipboard reports
+    # against what was asked. Without it the image write has no prediction to check and would have to
+    # claim success from "the clipboard now holds an image", which is a weaker statement than the text
+    # path can make.
+    $askedW = [int]$script:WpmShots[$ShotId].imageWidth
+    $askedH = [int]$script:WpmShots[$ShotId].imageHeight
+    $bmp = [System.Drawing.Image]::FromFile($file)
+    try {
+      [System.Windows.Forms.Clipboard]::Clear()
+      [System.Windows.Forms.Clipboard]::SetDataObject($bmp, $true)
+    } finally { $bmp.Dispose() }
+    $ok = $false; $w = 0; $h = 0
+    try {
+      if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
+        $img = [System.Windows.Forms.Clipboard]::GetImage()
+        $w = [int]$img.Width; $h = [int]$img.Height; $img.Dispose(); $ok = $true
+      }
+    } catch { }
+    return @{ ok = $ok; format = 'image'; shotId = $ShotId; file = $file; width = $askedW; height = $askedH;
+      readbackWidth = $w; readbackHeight = $h }
+  } catch {
+    return @{ ok = $false; reason = 'clipboard write failed: ' + $_.Exception.Message }
+  }
+}
+
+function Invoke-WpmWindowOp {
+  <#
+    One op on ONE window named by hwnd, and the verification is the OS's answer about the window, not
+    the return value of the call. That distinction is the whole point of this function: ShowWindow and
+    SetWindowPos return booleans about the CALL, and every action in this product that reported a call
+    instead of a state has eventually turned out to be the lying kind.
+      minimize -> IsIconic afterwards            (must be true)
+      restore  -> IsIconic afterwards            (must be false)
+      move     -> GetWindowRect afterwards       (left/top must match what was asked)
+      resize   -> GetWindowRect afterwards       (width/height must match, within 2px)
+      topmost  -> the WS_EX_TOPMOST bit, read back
+    `topmost` is the promotion of `MakeTopmostNoActivate`, which shipped as a TEST-SUPPORT primitive
+    (its comment says a model should not be able to topmost-raise arbitrary windows). 0.7.0 revisits
+    that: it is now reachable, it never activates the window, and the result still reports the ex-style
+    it read back -- see findings §5 for the reasoning that changed.
+
+    WHAT THIS FUNCTION DELIBERATELY DOES NOT REPORT: the foreground. `restore` activates by definition
+    (SW_RESTORE is documented to bring the window up), so "did the owner lose focus" is a question about
+    the moment around this call rather than about the state after it -- and engine.ps1 reads
+    GetForegroundWindow on both sides and reports the pair, where this function can only see one.
+  #>
+  param([IntPtr]$Hwnd, [string]$Op, [int]$X = 0, [int]$Y = 0, [int]$Width = 0, [int]$Height = 0)
+  if (-not $Hwnd -or -not [WpmWin]::IsWindow($Hwnd)) {
+    return @{ ok = $false; refusal = 'no_hwnd'; reason = 'the hwnd does not identify a live window' }
+  }
+  $before = New-Object 'WpmWin+RECT'
+  [void][WpmWin]::GetWindowRect($Hwnd, [ref]$before)
+  switch ($Op) {
+    'minimize' {
+      [void][WpmWin]::ShowWindow($Hwnd, [WpmWin]::SW_MINIMIZE)
+      $iconic = [WpmWin]::IsIconic($Hwnd)
+      return @{ ok = $iconic; op = $Op; iconic = $iconic;
+        reason = $(if ($iconic) { '' } else { 'ShowWindow(SW_MINIMIZE) returned and the window is still not iconic' }) }
+    }
+    'restore' {
+      [void][WpmWin]::ShowWindow($Hwnd, [WpmWin]::SW_RESTORE)
+      $iconic = [WpmWin]::IsIconic($Hwnd)
+      return @{ ok = (-not $iconic); op = $Op; iconic = $iconic;
+        reason = $(if ($iconic) { 'the window is still iconic after SW_RESTORE' } else { '' }) }
+    }
+    'move' {
+      # SWP_NOSIZE(1) | SWP_NOZORDER(4) | SWP_NOACTIVATE(10): a window move that stole the foreground
+      # would be exactly the disturbance the rest of this product refuses to cause.
+      $ok = [WpmWin]::SetWindowPos($Hwnd, [IntPtr]::Zero, $X, $Y, 0, 0, ([uint32]1 -bor [uint32]4 -bor [uint32]16))
+      $r = New-Object 'WpmWin+RECT'
+      [void][WpmWin]::GetWindowRect($Hwnd, [ref]$r)
+      $moved = ($r.Left -eq $X -and $r.Top -eq $Y)
+      return @{ ok = ($ok -and $moved); op = $Op; called = "$X,$Y"; rect = "$($r.Left),$($r.Top),$($r.Right),$($r.Bottom)";
+        before = "$($before.Left),$($before.Top),$($before.Right),$($before.Bottom)";
+        reason = $(if (-not $ok) { 'SetWindowPos was refused' } elseif (-not $moved) { 'the call returned and the window did not land where it was told' } else { '' }) }
+    }
+    'resize' {
+      $w = [Math]::Max(1, $Width); $h = [Math]::Max(1, $Height)
+      $ok = [WpmWin]::SetWindowPos($Hwnd, [IntPtr]::Zero, 0, 0, $w, $h, ([uint32]2 -bor [uint32]4 -bor [uint32]16))
+      $r = New-Object 'WpmWin+RECT'
+      [void][WpmWin]::GetWindowRect($Hwnd, [ref]$r)
+      $cw = $r.Right - $r.Left; $ch = $r.Bottom - $r.Top
+      # +-2 px: the window may clamp a size to its own minimum, and a 1px difference between the frame
+      # the app asks for and the rect Windows reports is normal, not a lie worth failing the action over.
+      $fits = ([Math]::Abs($cw - $w) -le 2) -and ([Math]::Abs($ch - $h) -le 2)
+      return @{ ok = ($ok -and $fits); op = $Op; asked = "${w}x${h}"; size = "${cw}x${ch}";
+        rect = "$($r.Left),$($r.Top),$($r.Right),$($r.Bottom)";
+        reason = $(if (-not $ok) { 'SetWindowPos was refused' } elseif (-not $fits) { 'the window came back a different size than was asked (a clamp, not a no-op)' } else { '' }) }
+    }
+    'topmost' {
+      $ok = [WpmWin]::MakeTopmostNoActivate($Hwnd)
+      $ex = [WpmWin]::GetWindowLong($Hwnd, [WpmWin]::GWL_EXSTYLE)
+      $isTop = ($ex -band [WpmWin]::WS_EX_TOPMOST) -ne 0
+      return @{ ok = ($ok -and $isTop); op = $Op; exStyle = ('0x' + $ex.ToString('X'));
+        topmost = $isTop; activated = 'no'
+        reason = $(if (-not $isTop) { 'the WS_EX_TOPMOST bit is not set on the window after the call' } else { '' }) }
+    }
+    default {
+      return @{ ok = $false; op = $Op; reason = "unknown window op '$Op'" }
+    }
+  }
+}
+
+# ==================================================================================================
 # 0.5.0 READ PATHS: a frame the model can read, a picture whose coordinates are DATA, and a preview
 # that answers in text. None of the three writes an input-queue entry or takes the focus.
 # ==================================================================================================

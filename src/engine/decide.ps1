@@ -48,6 +48,32 @@ $script:WpmRefusals = @{
   needs_facts          = 'the caller supplied no measured facts for this target; refusing instead of assuming quiet'
   takeover_unavailable = 'takeover was requested but cannot run safely right now: the HUD is not up, or the takeover gate is off. Next step: enable takeoverAllowed in settings (the HUD is a hard precondition, not a decoration) or call without takeover:true'
   keyinject_unavailable= 'keyboard injection was requested but cannot run: this target is not the foreground window and could not be raised (or it is elevated). Next step: bring the target to the front yourself, or call without keyInput:''inject'''
+  # ---- 0.7.0 authorization model. Three codes, each naming the NEXT STEP rather than describing the
+  # symptom, because all three are settings decisions and a caller that cannot tell which setting to
+  # raise will retry the same call forever.
+  policy_denied        = 'the action''s declared tier is above what the policy setting allows. Next step: raise policy in settings (readonly < quiet < balanced < full) -- NOT retrying this call'
+  user_active          = 'the owner was at the keyboard when this was asked for (last physical input younger than policyIdleMs) and the action needs the takeover tier. This product does not open a dialog at someone who is typing -- a popup is a second disturbance dressed as consent. Next step: wait for idle, or pass forceUserActive:true explicitly (it is recorded in the audit log as forced)'
+  app_launch_denied    = 'launch is not authorised: appLaunchAllowed is off, or the program is not on the appLaunchAllow whitelist (an empty whitelist means nothing may launch). Next step: the OWNER adds the exact name to the whitelist; a wildcard does not exist and this refusal is not a transient failure to retry through'
+}
+
+# THE LADDER, mirrored from lib/policy.js. Two copies of an ordering is normally the bug pattern this
+# repo refuses, and it is allowed here for exactly one reason: the engine and the host each need the
+# comparison in their own process, and scripts/check-policy-table.mjs asserts the two copies agree
+# (rung set, order, and every action's declared tier in tools.json). A drift between them is red at build
+# time instead of being a permission the owner believes they revoked.
+$script:WpmTierOrder = @('readonly', 'quiet', 'flash', 'takeover')
+$script:WpmPolicyCeiling = @{
+  readonly = 'readonly'; quiet = 'quiet'; balanced = 'flash'; full = 'takeover'
+}
+
+function Test-WpmTierAllowed {
+  # Pure, and it fails CLOSED in both directions: an unknown policy or an unknown rung answers false.
+  # "Unparseable setting" and "everything allowed" must never read the same way.
+  param([string]$Policy, [string]$Required)
+  if (-not $script:WpmPolicyCeiling.ContainsKey($Policy)) { return $false }
+  $need = [Array]::IndexOf($script:WpmTierOrder, $Required)
+  if ($need -lt 0) { return $false }
+  return $need -le [Array]::IndexOf($script:WpmTierOrder, $script:WpmPolicyCeiling[$Policy])
 }
 
 function New-WpmFacts {
@@ -69,7 +95,17 @@ function New-WpmFacts {
     [bool]$KeyInjectRequested = $false, # caller asked for keyboard injection (keyInput:'inject')
     [bool]$KeyInjectAllowed = $false,   # the host gate (keyInjectAllowed) let the request through
     [bool]$HudReady = $false,           # hud.ps1 says a HUD window is up RIGHT NOW
-    [bool]$ForegroundIsTarget = $false  # GetForegroundWindow() (or its root) IS this target
+    [bool]$ForegroundIsTarget = $false,  # GetForegroundWindow() (or its root) IS this target
+    # ---- 0.7.0 authorization facts, supplied by the caller because decide.ps1 does no IO: it cannot
+    # read settings, and a table that read its own permissions could not be unit-tested.
+    [string]$Policy = 'balanced',         # the ceiling the owner set (readonly|quiet|balanced|full)
+    [string]$RequiredTier = 'quiet',      # what THIS action needs at minimum (tools.json#requiresTier)
+    [long]$LastInputAgeMs = -1,           # -1 = UNKNOWN; unknown refuses, it does not mean "idle"
+    [int]$PolicyIdleMs = 3000,
+    [bool]$ForceUserActive = $false,      # the caller's explicit override, recorded in the audit
+    [bool]$AppLaunchAllowed = $false,
+    [string[]]$AppLaunchAllow = @(),
+    [string]$LaunchTarget = ''
   )
   return @{
     hwnd = $Hwnd; paused = $Paused; elevatedTarget = $ElevatedTarget; family = $Family
@@ -78,6 +114,9 @@ function New-WpmFacts {
     uiaTreeEmpty = $UiaTreeEmpty; uiaProbeFailed = $UiaProbeFailed
     takeoverRequested = $TakeoverRequested; keyInjectRequested = $KeyInjectRequested
     keyInjectAllowed = $KeyInjectAllowed; hudReady = $HudReady; foregroundIsTarget = $ForegroundIsTarget
+    policy = $Policy; requiredTier = $RequiredTier
+    lastInputAgeMs = $LastInputAgeMs; policyIdleMs = $PolicyIdleMs; forceUserActive = $ForceUserActive
+    appLaunchAllowed = $AppLaunchAllowed; appLaunchAllow = $AppLaunchAllow; launchTarget = $LaunchTarget
   }
 }
 
@@ -102,13 +141,31 @@ function Get-WpmChannelDecision {
     return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
       refusal = 'paused'; reason = $script:WpmRefusals.paused }
   }
-  if (-not $Facts.hwnd) {
+  # ---- 0.7.0 launch is not a windowed action, so the target checks do not apply to it ----------
+  # `no_hwnd` and `elevated_target` are statements ABOUT A TARGET WINDOW. `launch` has no target window at
+  # the moment it is decided -- that is precisely the point of the action -- and letting a hwnd check run
+  # first would turn every launch refusal into a wrong one (`no_hwnd` tells the caller to go find a
+  # handle, which is not what an unauthorised program name means). Guarded by the action rather than by
+  # handing the table a fake hwnd, because a fabricated fact in a decision table is how tables lie.
+  $isWindowedAction = $Facts.action -ne 'launch'
+  if ($isWindowedAction -and (-not $Facts.hwnd)) {
     return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
       refusal = 'no_hwnd'; reason = $script:WpmRefusals.no_hwnd }
   }
-  if ($Facts.elevatedTarget) {
+  if ($isWindowedAction -and $Facts.elevatedTarget) {
     return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
       refusal = 'elevated_target'; reason = $script:WpmRefusals.elevated_target }
+  }
+
+  # ---- 0.7.0-A the policy ceiling, BEFORE any capability is consulted --------------------------
+  # Why here and not at the takeover branch: `policy` answers "may this rung be used at all", and a
+  # capability check that runs first can produce a working channel for an action the owner excluded --
+  # the same ordering mistake the pause check documents above. The refusal names the setting to raise,
+  # because the correct response to this code is a settings change, never a retry.
+  if (-not (Test-WpmTierAllowed $Facts.policy $Facts.requiredTier)) {
+    return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
+      refusal = 'policy_denied'
+      reason = $script:WpmRefusals.policy_denied + " [action needs $($Facts.requiredTier); policy '$($Facts.policy)' allows at most $($script:WpmPolicyCeiling[$Facts.policy])]" }
   }
 
   # ---- R3 preconditions. These are refusals about the REQUEST, not about the target, and they come
@@ -126,6 +183,66 @@ function Get-WpmChannelDecision {
   if ($Facts.keyInjectRequested -and -not $Facts.foregroundIsTarget) {
     return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
       refusal = 'keyinject_unavailable'; reason = $script:WpmRefusals.keyinject_unavailable }
+  }
+
+  # ---- 0.7.0 the launch gate and its whitelist, double-checked here -----------------------------
+  # The host applies this BEFORE any worker request; this is the second line, because a permission that
+  # exists only in one process is a permission that can be reached around by calling the other one (the
+  # same argument that puts the HUD re-check in engine.ps1 rather than trusting the gate). ORDER MATTERS:
+  # this runs after the per-tier preconditions and BEFORE the idle check, which is the sequence the plan
+  # specifies -- an unauthorised program must be reported as unauthorised, not as "the owner is busy",
+  # because the two refusals tell the caller to change two different things.
+  if ($Facts.action -eq 'launch') {
+    if (-not $Facts.appLaunchAllowed) {
+      return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
+        refusal = 'app_launch_denied'; reason = $script:WpmRefusals.app_launch_denied + ' [appLaunchAllowed is off]' }
+    }
+    $t = if ($Facts.launchTarget) { $Facts.launchTarget.ToLower() } else { '' }
+    $hit = $false
+    foreach ($w in @($Facts.appLaunchAllow)) {
+      # EXACT match, case-folded. No wildcard, no prefix, no substring: `notepad` must not authorise
+      # `notepad-helper.exe`, and a prefix rule is the shape of a whitelist that expands by accident.
+      if ($w -and ([string]$w).Trim().ToLower() -ceq $t) { $hit = $true; break }
+    }
+    if (-not $hit) {
+      return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
+        refusal = 'app_launch_denied'
+        reason = $script:WpmRefusals.app_launch_denied + " [no exact entry for '$t'; whitelist holds $(@($Facts.appLaunchAllow).Count) name(s)]" }
+    }
+    # Fall through to the idle check below: an authorised name is still not permission to start a program
+    # while someone is typing at this keyboard.
+  }
+
+  # ---- 0.7.0-B idle sensing: the owner is at the keyboard, so do not interrupt them -------------
+  # Only a takeover-tier action is refused here. The quiet and flash tiers do not touch the owner's
+  # cursor or hold their focus, so "you are busy" does not apply to them -- refusing those would refuse
+  # the reason this product exists. `launch` reaches here with requiredTier 'takeover', so starting a
+  # program while the owner is typing is refused too: that is the plan's order, and it is the correct
+  # one, because a program started at the wrong moment is the least interruptible action in this product.
+  #
+  # AN UNKNOWN AGE ALLOWS, and that is a decision rather than an oversight. `LastInputAgeMs` answers -1
+  # when GetLastInputInfo fails; refusing on -1 would block every takeover on a machine where that one
+  # API does not answer, and the owner who opted into takeoverAllowed has already accepted the tier. This
+  # is the OPPOSITE of how the proof path treats -1 (there, unknown must never be read as "the desktop
+  # was still", because that would launder a disturbance into innocence) -- the two directions differ
+  # because the costs differ: here unknown costs an agent a convenience, there it costs the owner the
+  # truth. Both choices are stated where the comparison is made rather than inherited from a convention.
+  #
+  # Written as one-line conditions: a multi-line `if (A -and -not B` newline `-and C)` expression reads
+  # fine to a human and fails the PowerShell parser at the `-and` that opens the continuation line -- a
+  # runtime-only parse failure in a dot-sourced file, which surfaces as `action_failed` from the worker.
+  $needsTakeover = ($Facts.requiredTier -eq 'takeover')
+  $ageKnown = ([long]$Facts.lastInputAgeMs -ge 0)
+  $ownerPresent = ($ageKnown -and ([long]$Facts.lastInputAgeMs -lt [int]$Facts.policyIdleMs))
+  if ($needsTakeover -and $ownerPresent -and (-not $Facts.forceUserActive)) {
+    return @{ channel = 'refuse'; tier = 'none'; needsRestore = $false
+      refusal = 'user_active'
+      reason = $script:WpmRefusals.user_active + " [last physical input $($Facts.lastInputAgeMs)ms ago; policyIdleMs=$($Facts.policyIdleMs)]" }
+  }
+
+  if ($Facts.action -eq 'launch') {
+    return @{ channel = 'launch'; tier = 'takeover'; needsRestore = $false; refusal = ''
+      reason = 'launch is authorised by both switches and the owner is not at the keyboard' }
   }
 
   $tier = if ($Facts.takeoverRequested) { 'takeover' } else { 'quiet' }

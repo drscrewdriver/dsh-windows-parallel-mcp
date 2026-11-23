@@ -17,7 +17,10 @@
       "wpm_status": "status",
       "wpm_snapshot": "snapshot",
       "wpm_screenshot": "screenshot",
-      "wpm_preview": "preview"
+      "wpm_preview": "preview",
+      "wpm_launch": "launch",
+      "wpm_clipboard": "clipboard",
+      "wpm_window": "window"
     },
     "extraWorkerActions": [
       { "action": "ping", "exposed": false, "why": "protocol/encoding self-test; not part of the tool surface" },
@@ -25,11 +28,13 @@
     ]
   },
   "notes": [
-    "The eight tool names are fixed here so both delivery forms expose the same action surface.",
+    "The eleven tool names are fixed here so both delivery forms expose the same action surface.",
     "src/engine/engine.ps1 is the only implementation; this file is the contract, not a second implementation.",
     "docs/refusals.md is the human-readable form of `refusals`; scripts/check-refusals.mjs keeps them equal.",
     "The `refusalCases` array is executable: test/refusals-test.ps1 iterates it and binds the placeholders, so a documented refusal path cannot rot into fiction.",
-    "0.5.0 adds snapshot/screenshot/preview. They are READ paths: `snapshot` walks the accessibility tree and hands the model numbered `label`s, `screenshot` captures the window rect and returns the coordinate mapping as data, `preview` draws the marker at a point and reports the element UNDER it as text. No new input primitive, no automatic fallback chain -- the model decides."
+    "0.5.0 adds snapshot/screenshot/preview. They are READ paths: `snapshot` walks the accessibility tree and hands the model numbered `label`s, `screenshot` captures the window rect and returns the coordinate mapping as data, `preview` draws the marker at a point and reports the element UNDER it as text. No new input primitive, no automatic fallback chain -- the model decides.",
+    "0.6.0 adds NO action and NO refusal code. It changes what `type` reports: the value is read back after the settle window and `effect=readback-verified` is granted only on an exact match against a prediction built from the control's own measurements. A masked field is readback=unavailable, a reformatted value is readbackMismatch=true, and both stay successes -- 'the application changed my input' is not an error in the call.",
+    "0.7.0 adds launch/clipboard/window and every action now declares `requiresTier` (the LOWEST rung it can ever need). One setting, `policy`, is the ceiling; `requiresTierFor` refines an action whose halves differ (clipboard read is readonly, clipboard write is flash). The rung an undeclared action would get is `takeover`: silence about a capability must not read as permission for it. That table is checked against lib/policy.js by scripts/check-policy-table.mjs, because a policy table kept in two places is the drift this repo has been bitten by three times."
   ],
   "stance": {
     "inputQueue": "quiet and bounded-flash tiers write nothing to the OS input queue. The takeover tier (opt-in, takeoverAllowed) may send KEYBOARD input (SendInput + KEYEVENTF_UNICODE) only when keyInput='inject' was requested; mouse injection is structurally impossible (MOUSEEVENTF_* is banned repo-wide and the gate enforces it)",
@@ -53,13 +58,17 @@
     { "code": "action_failed", "layer": "runtime", "summary": "the chosen channel threw while acting", "uncoveredReason": "needs a target whose channel reliably throws; not constructed this round (docs/refusals.md, gap 2)" },
     { "code": "stale_ref", "layer": "runtime", "summary": "the call names a previous generation of engine output that no longer exists: a shotId that was cleaned up, a label whose snapId was superseded, or space:'image' without any shotId. Read paths are cheap; re-take the snapshot/screenshot and act on the new ids instead of substituting coordinates" },
     { "code": "restore_failed", "layer": "runtime", "summary": "the OS refused to return the foreground after a flash", "uncoveredReason": "needs a real elevated window; task_52 (docs/refusals.md, gap 2)" },
-    { "code": "takeover_aborted", "layer": "runtime", "summary": "the owner or the host interrupted a takeover (HUD button, abort chord, host cancellation). Not a fault: the result still carries cursorRestored and injectedChars so the reader knows exactly how far it got", "uncoveredReason": "fires from a real interruption inside a live takeover action; test/takeover-test.ps1 covers the three interruption paths at the engine level (volatile flag, latch file, and the send-time abort probe), and the schema case is declared uncovered because the refusal vocabulary gate needs an executable decision-mode instance and this is a runtime outcome" }
+    { "code": "takeover_aborted", "layer": "runtime", "summary": "the owner or the host interrupted a takeover (HUD button, abort chord, host cancellation). Not a fault: the result still carries cursorRestored and injectedChars so the reader knows exactly how far it got", "uncoveredReason": "fires from a real interruption inside a live takeover action; test/takeover-test.ps1 covers the three interruption paths at the engine level (volatile flag, latch file, and the send-time abort probe), and the schema case is declared uncovered because the refusal vocabulary gate needs an executable decision-mode instance and this is a runtime outcome" },
+    { "code": "app_launch_denied", "layer": "decision", "summary": "action=launch was refused before any worker request because appLaunchAllowed is off or the target is not on the appLaunchAllow whitelist. The next step is the owner's decision, not a retry: add the EXACT name to the whitelist (no wildcard exists, and an empty list means nothing may launch even with the gate on). Both switches must be set -- a takeover permission is not a launch permission" },
+    { "code": "policy_denied", "layer": "decision", "summary": "the action's declared tier is above what the `policy` setting allows, so it was refused before the worker was reached. The next step is named: raise `policy`, do not retry the same call. A refusal here is the setting doing its job, not a failure of the target" },
+    { "code": "user_active", "layer": "decision", "summary": "the last PHYSICAL input is younger than policyIdleMs and the action needs the takeover tier, so the owner is at the keyboard and was NOT interrupted. Unlike the upstream design this product does not pop a countdown dialog at someone who is typing: a dialog is a second disturbance dressed as consent. The next step is to wait for idle, or to pass forceUserActive:true explicitly (which is recorded in the audit log as forced)" }
   ],
   "tools": [
     {
       "name": "wpm_windows",
       "action": "windows",
       "engine": "Get-WpmWindowList",
+      "requiresTier": "readonly",
       "description": "List live top-level windows the engine could drive: hwnd, title, window class, owning pid and screen rect. Read-only. Visible, titled, non-minimized windows only, because a list padded with invisible helper windows makes target selection guesswork.",
       "inputSchema": {
         "type": "object",
@@ -68,12 +77,13 @@
         "additionalProperties": false
       },
       "refusals": [],
-      "noRefusalReason": "pure enumeration: no target is acted on, so there is nothing to refuse. An empty list means no window matched the filter, and that is reported as an empty list, not as a failure."
+      "noRefusalReason": "pure enumeration: no target is acted on, so there is nothing to refuse. An empty list means no window matched the filter, and that is reported as an empty list, not as a failure. It also declares the ladder's FLOOR rung (requiresTier: readonly), which is why policy_denied cannot reach it either: no policy level is below readonly, and an unparseable `policy` value falls back to `balanced` rather than to a level that would refuse reads."
     },
     {
       "name": "wpm_click",
       "action": "click",
       "engine": "Invoke-WpmAction -Action click",
+      "requiresTier": "quiet",
       "description": "Click at a screen coordinate inside the named window, or at the element named by a snapshot `label`. Chooses the cheapest available door: a classic child window receives the click as a window message (quiet tier, measured 0/6 foreground changes), otherwise a UIA pattern is used and the foreground is reversed once afterwards (bounded-flash tier, measured net return 15..95 ms). The cursor does not move in either tier. With `space:\"image\"` the coordinates are IMAGE pixels from a `screenshot` and the engine converts them back to screen pixels -- the caller never multiplies a scale factor.",
       "inputSchema": {
         "type": "object",
@@ -92,12 +102,13 @@
         "required": ["hwnd", "x", "y"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "stale_ref", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "stale_ref", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted", "policy_denied", "user_active"]
     },
     {
       "name": "wpm_type",
       "action": "type",
       "engine": "Invoke-WpmAction -Action type",
+      "requiresTier": "quiet",
       "description": "Write text into the named window: either the first editable classic child (quiet tier) or a UIA element named by the caller (bounded-flash tier). No keystrokes are synthesized; the text is delivered through the window message or the pattern itself. WHAT HAPPENS AFTER THE WRITE IS READ BACK: the engine reads the control's value again (WM_GETTEXT on the message door, ValuePattern/LegacyIAccessible Current.Value on UIA) and only reports effect=readback-verified when the value it read equals the value predicted from what the control itself reported. A field that does not expose its text yields readback=unavailable and no upgrade; a value that came back different yields readbackMismatch=true while the effect stays what the write earned -- the application may legitimately reformat input, so a mismatch is data, not a refusal.",
       "inputSchema": {
         "type": "object",
@@ -118,12 +129,13 @@
         "additionalProperties": false
       },
       "notes_0_6_0": "0.6.0 adds readback + caretPosition and changes nothing in this refusals list: disabled targets, focus movement and a mismatching readback are reported in detail/effect, not as new codes -- they are states of the target, not errors in the call.",
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted", "policy_denied", "user_active"]
     },
     {
       "name": "wpm_focus",
       "action": "focus",
       "engine": "Invoke-WpmAction -Action focus",
+      "requiresTier": "quiet",
       "description": "Move keyboard focus to a named control inside the target, then reverse the foreground change once. This action always needs a UIA element: the message tier cannot set keyboard focus, so a window with no pattern is refused rather than clicked at a guessed coordinate.",
       "inputSchema": {
         "type": "object",
@@ -139,12 +151,13 @@
         "required": ["hwnd", "elementName"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "takeover_aborted"]
+      "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "takeover_aborted", "policy_denied", "user_active"]
     },
     {
       "name": "wpm_status",
       "action": "status",
       "engine": "Get-WpmStatus",
+      "requiresTier": "readonly",
       "description": "Report the engine's state and the desktop's focus table: paused flag, foreground window and pid, the control that holds keyboard focus, the age of the last human input, and the engine's stated stance. Read-only; useful before acting and after a refusal.",
       "inputSchema": {
         "type": "object",
@@ -153,12 +166,13 @@
         "additionalProperties": false
       },
       "refusals": [],
-      "noRefusalReason": "pure query: it reads the focus table and returns it. There is no target to refuse, and inventing a refusal code for this tool would create a branch that can never be exercised."
+      "noRefusalReason": "pure query: it reads the focus table and returns it. There is no target to refuse, and inventing a refusal code for this tool would create a branch that can never be exercised. Same floor argument as wpm_windows: readonly is the ladder's bottom rung, so no policy level can refuse it -- and `status` is precisely the call a caller uses to find out WHY something else was refused, so a refusal here would be self-defeating."
     },
     {
       "name": "wpm_snapshot",
       "action": "snapshot",
       "engine": "Invoke-WpmAction -Action snapshot",
+      "requiresTier": "readonly",
       "description": "Read the target's accessibility tree as a NUMBERED element table: one line per element with a continuous `label`, its control type, name, automation id, screen rect (physical pixels) and the UIA patterns it exposes. This is the frame the model reasons on and the label it answers with -- pass `label`+`snapId` to click/type/focus instead of guessing coordinates. The labels are resolved back to the ELEMENT (by UIA RuntimeId, measured stable across queries), so an action taken by label still uses the silent UIA pattern path and never degrades into a coordinate click. Read-only: no input, no focus change, no proof window. '0 element(s)' is a real answer (measured on windows that disable UI Automation) and is reported as such, not as a failure.",
       "inputSchema": {
         "type": "object",
@@ -172,12 +186,13 @@
         "required": ["hwnd"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "uia_probe_failed", "stale_ref"]
+      "refusals": ["no_hwnd", "paused", "uia_probe_failed", "stale_ref", "policy_denied"]
     },
     {
       "name": "wpm_screenshot",
       "action": "screenshot",
       "engine": "Invoke-WpmAction -Action screenshot",
+      "requiresTier": "readonly",
       "description": "Capture the target's screen rectangle to a PNG on disk and return the COORDINATE MAPPING as data: screenRect, imageSize, scale, identity, frame and dpiAware. The image is not returned inline (a plugin cannot mint an inline image block without the host's attachment service); write it to disk and read it with the host's image reader. The point of this action is not the picture -- it is that the caller never has to multiply a scale factor itself: hand the image coordinates straight back to click with space:'image' and the engine does the conversion, then still asserts that the point belongs to the target.",
       "inputSchema": {
         "type": "object",
@@ -189,12 +204,13 @@
         "required": [],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused"]
+      "refusals": ["no_hwnd", "paused", "policy_denied"]
     },
     {
       "name": "wpm_preview",
       "action": "preview",
       "engine": "Invoke-WpmAction -Action preview",
+      "requiresTier": "readonly",
       "description": "Show the owner where a click WOULD land, without clicking: draw the AI marker at the point (when the overlay is up) and report, as text, which element sits under it (name, control type, automation id, rect). This turns an irreversible click into a reviewable one, and it makes confirmation independent of vision -- the answer is what the OS says is at that point, not a guess from a picture. Silent by construction: it writes no input queue entry, takes no focus, and produces no proof window. Use it before a destructive click, or as the confirmation step after reading a snapshot.",
       "inputSchema": {
         "type": "object",
@@ -206,7 +222,66 @@
         "required": ["hwnd", "x", "y"],
         "additionalProperties": false
       },
-      "refusals": ["no_hwnd", "paused", "unreachable"]
+      "refusals": ["no_hwnd", "paused", "unreachable", "policy_denied"]
+    },
+    {
+      "name": "wpm_launch",
+      "action": "launch",
+      "engine": "Invoke-WpmDesktopAction -Action launch",
+      "requiresTier": "takeover",
+      "description": "Start a program. This is the one action whose consequences outlive the call, so it needs TWO switches and neither implies the other: appLaunchAllowed (the gate) and appLaunchAllow (an exact-name whitelist, empty by default = nothing may launch). A takeover permission is not a launch permission and vice versa. The started process is reported by pid; its window may not exist yet, because Process.Start returns while the app is still loading (measured: MainWindowHandle=0 for 1348 ms on a cold notepad), so waitMs polls for it and a window that has not appeared is reported as ok:true with hwnd=\"\" and detail=window-not-yet rather than as a failed launch. Arguments are passed through as given and written to the audit log, because a whitelist vouches for a program, not for what it is told to do.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string", "description": "Program name or absolute exe path. It must appear in appLaunchAllow EXACTLY (case-insensitive, no wildcards, no prefixes): 'notepad' does not authorise 'notepad-helper.exe'." },
+          "args": { "type": "string", "description": "One command line for the program. Recorded in the audit log verbatim; the whitelist does not parse it." },
+          "waitMs": { "type": "integer", "minimum": 0, "maximum": 30000, "default": 3000, "description": "How long to wait for the process to publish a top-level window. 0 returns immediately with the pid and no hwnd." }
+        },
+        "required": ["target"],
+        "additionalProperties": false
+      },
+      "refusals": ["paused", "app_launch_denied", "policy_denied", "action_failed"]
+    },
+    {
+      "name": "wpm_clipboard",
+      "action": "clipboard",
+      "engine": "Invoke-WpmDesktopAction -Action clipboard",
+      "requiresTier": "readonly",
+      "requiresTierFor": { "read": "readonly", "write": "flash" },
+      "description": "Read or write the system clipboard. A read is a READ (no input, no focus) but it is the most private one in this product: the clipboard may hold a password or a token the owner copied seconds ago. So a text read reports its LENGTH in the result and the audit log never sees the content, values are capped at 64 KB with truncation stated rather than silently cut, and a format that is neither text nor image is refused with the format names it DID find. A write goes through the same STA path that measured 138 ms cold, and an image write accepts a shotId so a screenshot can be pushed into the clipboard without the caller handling pixels. Writing is the louder half and is graded at the flash tier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "op": { "type": "string", "enum": ["read", "write"], "description": "read: report what the clipboard holds (length, never payload). write: replace it." },
+          "format": { "type": "string", "enum": ["text", "image"], "default": "text", "description": "Which clipboard format. image read writes a PNG under %LOCALAPPDATA%\\wpm\\clipboard; image write needs shotId." },
+          "text": { "type": "string", "description": "write + format=text: the value. An empty write is refused: it cannot be told apart from a clipboard the owner already cleared." },
+          "shotId": { "type": "string", "description": "write + format=image: the screenshot to put on the clipboard. A shotId the retention policy already dropped is refused with stale_ref." }
+        },
+        "required": ["op"],
+        "additionalProperties": false
+      },
+      "refusals": ["paused", "policy_denied", "action_failed", "stale_ref"]
+    },
+    {
+      "name": "wpm_window",
+      "action": "window",
+      "engine": "Invoke-WpmDesktopAction -Action window",
+      "requiresTier": "flash",
+      "description": "Minimize, restore, move, resize or topmost ONE window named by hwnd. Every op is verified by reading the window's OWN state back -- IsIconic, the rect, the WS_EX_TOPMOST bit -- not by the syscall's return value, because a call that answered yes while the window said no is the failure this product has been trained on. move/resize never activate (SWP_NOACTIVATE) and topmost never takes the foreground. There is no 'all windows' op and no wildcards: an action that could address every window on the desktop would not need a target parameter. `topmost` is the promotion of a primitive that shipped as test-support-only (scripts/raise-topmost.ps1); 0.7.0 re-evaluated it and put it behind the flash tier rather than leaving it unreachable, and the finding records the reasoning that changed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hwnd": { "type": "string", "description": "The window to act on. Required: without it there is no answer but no_hwnd, because 'the front window' is not a window this plugin may choose." },
+          "op": { "type": "string", "enum": ["minimize", "restore", "move", "resize", "topmost"], "description": "Which change to make. The result reports the state that was read back afterwards, with verified=true only when it matches." },
+          "x": { "type": "integer", "description": "move: the target left edge in physical screen pixels." },
+          "y": { "type": "integer", "description": "move: the target top edge." },
+          "width": { "type": "integer", "minimum": 1, "description": "resize: the target width. A window may clamp it; the result says what it became." },
+          "height": { "type": "integer", "minimum": 1, "description": "resize: the target height." }
+        },
+        "required": ["hwnd", "op"],
+        "additionalProperties": false
+      },
+      "refusals": ["paused", "no_hwnd", "policy_denied", "action_failed"]
     }
   ],
   "refusalCases": [
@@ -370,6 +445,72 @@
       "args": { "hwnd": "$liveHwnd", "elementName": "x" },
       "expect": "restore_failed",
       "note": "NOT COVERED: needs a real elevated window. task_52."
+    },
+    {
+      "id": "policy-ceiling-readonly",
+      "mode": "decision",
+      "tool": "wpm_click",
+      "facts": { "hwnd": "$liveHwnd", "policy": "readonly", "requiredTier": "quiet" },
+      "expect": "policy_denied",
+      "note": "Decision-table instance: the ceiling is checked BEFORE any capability, so a target with a perfect message door is still refused when the owner said 'reads only'. The refusal is about the setting, and the reason names which setting."
+    },
+    {
+      "id": "policy-ceiling-takeover",
+      "mode": "decision",
+      "tool": "wpm_launch",
+      "facts": { "action": "launch", "policy": "balanced", "requiredTier": "takeover", "appLaunchAllowed": true, "appLaunchAllow": ["write-only-probe"], "launchTarget": "write-only-probe" },
+      "expect": "policy_denied",
+      "note": "The ordering case that proves the two axes are actually two: BOTH launch switches are satisfied here and the call is STILL refused, because `balanced` stops at the flash rung and launch needs takeover. If the launch gate ran first this case would be a silent false positive."
+    },
+    {
+      "id": "user-active-takeover",
+      "mode": "decision",
+      "tool": "wpm_click",
+      "facts": { "hwnd": "$liveHwnd", "policy": "full", "requiredTier": "takeover", "lastInputAgeMs": 100, "policyIdleMs": 3000 },
+      "expect": "user_active",
+      "note": "The owner typed something 100 ms ago and this call wants the real cursor. Refused, and NO dialog is opened: the upstream design pops a 10-second countdown even while you are typing, which is a second disturbance presented as consent. Next step is to wait, or to pass forceUserActive:true (recorded in the audit as forced)."
+    },
+    {
+      "id": "launch-gate-off",
+      "mode": "engine",
+      "tool": "wpm_launch",
+      "args": { "target": "write-only-probe" },
+      "gate": { "policy": "full", "launchAllowed": false, "allowList": ["write-only-probe"] },
+      "expect": "app_launch_denied",
+      "note": "Engine-level: the gate is off, so nothing is started. The ceiling is raised to 'full' HERE because policy is consulted first by design (see policy-ceiling-takeover for the other order); with 'balanced' this case would correctly report policy_denied and would not be testing the launch switch at all. Measured by the absence of a pid in the result and by test/plugin-test.mjs's worker-request counter at the host level -- a launch refusal that still started the process would be the worst bug in this product."
+    },
+    {
+      "id": "launch-not-whitelisted",
+      "mode": "engine",
+      "tool": "wpm_launch",
+      "args": { "target": "calc" },
+      "gate": { "policy": "full", "launchAllowed": true, "allowList": ["write-only-probe", "notepad"] },
+      "expect": "app_launch_denied",
+      "note": "The gate is ON and the name is not on the list -- the two-switch design in one case. EXACT match, so 'calc' is refused while 'notepad' would pass; 'notepad-helper' would also be refused, which is the prefix rule this contract explicitly does not implement."
+    },
+    {
+      "id": "window-dead-hwnd",
+      "mode": "engine",
+      "tool": "wpm_window",
+      "args": { "hwnd": "$deadHwnd", "op": "minimize" },
+      "expect": "no_hwnd",
+      "note": "A window op on a handle that no longer identifies a live window. Refused before ShowWindow, not after: 'the call returned false' would describe a different failure than 'there is no such window'."
+    },
+    {
+      "id": "clipboard-unknown-op",
+      "mode": "engine",
+      "tool": "wpm_clipboard",
+      "args": { "op": "peek" },
+      "expect": "action_failed",
+      "note": "An op that is neither read nor write. Reported as action_failed with the requirement in the reason rather than as a new code: this is a malformed call, not a state of the desktop, and the closed vocabulary already says which of the two it was."
+    },
+    {
+      "id": "clipboard-write-empty",
+      "mode": "engine",
+      "tool": "wpm_clipboard",
+      "args": { "op": "write", "format": "text" },
+      "expect": "action_failed",
+      "note": "An empty text write is refused with the same reasoning `type` uses for an empty write: it cannot be distinguished from a clipboard the owner already cleared, and an 'ok' here would be a claim about nothing."
     }
   ]
 }

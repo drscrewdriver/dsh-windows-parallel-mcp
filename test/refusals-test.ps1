@@ -100,6 +100,12 @@ function New-CaseFacts([object]$factsSpec) {
     # otherwise. Found on 2026-11-23 by running the suite at HEAD, where it was already red.
     takeoverRequested = 'TakeoverRequested'; keyInjectRequested = 'KeyInjectRequested'
     keyInjectAllowed = 'KeyInjectAllowed'; hudReady = 'HudReady'; foregroundIsTarget = 'ForegroundIsTarget'
+    # 0.7.0's authorization facts. Named here as soon as they exist in the constructor: the R3 lesson
+    # above is that a field added to the constructor and to tools.json but NOT to this map makes the
+    # documented refusal unexercised while the schema still promises it.
+    policy = 'Policy'; requiredTier = 'RequiredTier'
+    lastInputAgeMs = 'LastInputAgeMs'; policyIdleMs = 'PolicyIdleMs'; forceUserActive = 'ForceUserActive'
+    appLaunchAllowed = 'AppLaunchAllowed'; appLaunchAllow = 'AppLaunchAllow'; launchTarget = 'LaunchTarget'
   }
   $splat = @{}
   foreach ($k in $factsSpec.PSObject.Properties.Name) {
@@ -156,6 +162,34 @@ function Invoke-Case([object]$case) {
           $r = Invoke-WpmAction @common -Action preview -X ([int](Get-CaseArg $ca 'x')) -Y ([int](Get-CaseArg $ca 'y'))
         } elseif ($tool -eq 'wpm_status') {
           $r = Invoke-WpmAction @common -Action status
+        } elseif ($tool -eq 'wpm_launch') {
+          # The gate fields come from the case's own `gate` object, NOT from `args`: `args` is validated
+          # against the tool's inputSchema by scripts/check-refusals.mjs, and a settings field smuggled in
+          # there would make the contract document a parameter that does not exist.
+          $gate = Get-CaseArg $case 'gate'
+          $allowList = @()
+          if ($null -ne $gate -and ($gate.PSObject.Properties.Name -contains 'allowList') -and $gate.allowList) {
+            $allowList = @($gate.allowList | ForEach-Object { [string]$_ })
+          }
+          # Built as a splat rather than a positional call because an EMPTY string here would be a
+          # statement: `-Policy ''` is not "use the default", it is "the owner set an unknown level", and
+          # Test-WpmTierAllowed refuses unknown levels on purpose. Absent means default, and that has to
+          # stay two different things.
+          $lsplat = @{ Action = 'launch'; Target = [string](Get-CaseArg $ca 'target'); AppLaunchAllow = $allowList }
+          $pl = if ($null -ne $gate) { [string](Get-CaseArg $gate 'policy') } else { '' }
+          if ($pl) { $lsplat['Policy'] = $pl }
+          $wm = if ($null -ne $ca) { Get-CaseArg $ca 'waitMs' } else { $null }
+          if ($null -ne $wm) { $lsplat['WaitMs'] = [int]$wm }
+          if ($null -ne $gate) { $lsplat['AppLaunchAllowed'] = [bool](Get-CaseArg $gate 'launchAllowed') }
+          $r = Invoke-WpmDesktopAction @lsplat
+        } elseif ($tool -eq 'wpm_clipboard') {
+          $r = Invoke-WpmDesktopAction -Action clipboard `
+            -Op ([string](Get-CaseArg $ca 'op')) -Format ([string](Get-CaseArg $ca 'format')) `
+            -Text ([string](Get-CaseArg $ca 'text')) -ShotId ([string](Get-CaseArg $ca 'shotId'))
+        } elseif ($tool -eq 'wpm_window') {
+          $r = Invoke-WpmDesktopAction -Action window -Hwnd $hwnd `
+            -Op ([string](Get-CaseArg $ca 'op')) `
+            -X ([int](Get-CaseArg $ca 'x')) -Y ([int](Get-CaseArg $ca 'y'))
         } else {
           throw "case '$($case.id)' names tool '$tool' but this runner has no mapping for it"
         }
