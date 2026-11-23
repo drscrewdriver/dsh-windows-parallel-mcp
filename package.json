@@ -1,12 +1,12 @@
 {
   "name": "dsh-windows-parallel-mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publishConfig": {
     "access": "public",
     "tag": "latest",
     "registry": "https://registry.npmjs.org/"
   },
-  "description": "Drive a Windows window quietly by default and visibly on request: one tool, eight actions (windows, status, click, type, focus, snapshot, screenshot, preview), a channel decision table that prefers the quiet door, a bounded self-reversing focus flash when only UI Automation can reach the control, an opt-in takeover tier (HUD mandatory, cursor always restored, keyboard injection only when asked and only for the foreground target), and a read surface that hands the model a numbered element frame plus screenshot coordinates as data so it never multiplies a scale factor. Windows PowerShell 5.1 sidecar, zero install dependencies, no mouse injection.",
+  "description": "Drive a Windows window quietly by default and visibly on request: one tool, eight actions (windows, status, click, type, focus, snapshot, screenshot, preview), a channel decision table that prefers the quiet door, a bounded self-reversing focus flash when only UI Automation can reach the control, an opt-in takeover tier (HUD mandatory, cursor always restored, keyboard injection only when asked and only for the foreground target), and a read surface that hands the model a numbered element frame plus screenshot coordinates as data so it never multiplies a scale factor. Since 0.6.0 a write is read back: effect=readback-verified is granted only when the value in the field matches a prediction built from the control's own measurements, caretPosition places the caret (start/end, with the applied selection reported), disabled and focus-moved targets are named in the result, and the screenshot says which path painted it (captureBackend=bitblt|gdiplus). Windows PowerShell 5.1 sidecar, zero install dependencies, no mouse injection.",
   "keywords": [
     "deepseek",
     "deepseek-harness",

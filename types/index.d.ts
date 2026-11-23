@@ -1,9 +1,23 @@
 // Type declarations for dsh-windows-parallel-mcp (public API surface).
-// Mirrors lib/index.js + lib/host-tools.js + src/schema/tools.json (v0.5.0).
+// Mirrors lib/index.js + lib/host-tools.js + src/schema/tools.json (v0.6.0).
 
 export type WpmAction =
   | 'windows' | 'click' | 'type' | 'focus' | 'status'
   | 'snapshot' | 'screenshot' | 'preview';
+
+/**
+ * WHO REPORTED THE SUCCESS. The first three name a messenger, not a degree of confidence (see the
+ * `effect` block in lib/index.js). `readback-verified` is the fourth and the only one that is about the
+ * application rather than about the call: the value was read back after the settle window and equals
+ * what the control's own measurements predicted. A masked field never reaches it (readback=unavailable)
+ * and a reformatted value never reaches it (readbackMismatch=true) -- the engine does not upgrade on
+ * "the call came back".
+ */
+export type WpmEffect =
+  | 'unverified' | 'reported-by-send' | 'reported-by-pattern' | 'readback-verified';
+
+/** Where the caret sits before the message door types. `idle` touches nothing. */
+export type WpmCaretPosition = 'idle' | 'start' | 'end';
 
 export type RefusalCode =
   | 'no_hwnd' | 'paused' | 'elevated_target' | 'unreachable'
@@ -18,6 +32,15 @@ export type WpmPointSpace = 'screen' | 'image';
 
 /** Frame source of a captured screenRect. `dwm` is the DWM extended frame; `win32` is the fallback. */
 export type WpmFrameSource = 'dwm' | 'win32';
+
+/**
+ * WHICH CAPTURE PATH produced a screenshot. `bitblt` is the cheap GDI path (measured 16-21ms against
+ * 22-33ms for the other); `gdiplus` is `Graphics.CopyFromScreen`, either the explicit choice or the
+ * fallback after BitBlt was refused. The two are measured equivalent on a still scene, but they are not
+ * the same call and the field is never omitted -- a path that changed silently is the failure mode this
+ * repo has already been caught by once with `frame`.
+ */
+export type WpmCaptureBackend = 'bitblt' | 'gdiplus';
 
 export interface WpmWindow {
   hwnd: string; title: string; class: string; pid: number;
@@ -44,6 +67,7 @@ export interface WpmShot {
   scale: number;
   identity: boolean;
   frame: WpmFrameSource;
+  captureBackend?: WpmCaptureBackend;
   dpiAware: boolean;
 }
 
@@ -55,6 +79,7 @@ export interface WpmArgs {
   text?: string;
   elementName?: string;
   replace?: boolean;
+  caretPosition?: WpmCaretPosition;
   settleMs?: number;
   takeover?: boolean;
   takeoverMaxMs?: number;
@@ -77,7 +102,7 @@ export interface WpmResult {
   refusal?: RefusalCode;
   channel?: string;
   tier?: string;
-  effect?: string;
+  effect?: WpmEffect;
   proof?: 'pass' | 'fail' | 'inconclusive';
   focusTaken?: boolean;
   takeover?: 'on' | 'off';
@@ -102,6 +127,8 @@ export interface WpmResult {
   scale?: number;
   identity?: boolean;
   frame?: WpmFrameSource;
+  captureBackend?: WpmCaptureBackend;
+  captureNote?: string;
   dpiAware?: boolean;
   // ---- preview ----
   preview?: { x: number; y: number; name: string; controlType: string; automationId: string };

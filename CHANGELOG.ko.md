@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.6.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+
+> 0.6.0은 `type`을 "보냈다"에서 "필드에 실제로 이 값이 들어갔다"로 끌어올린다. 네 번째 `effect=readback-verified`를 추가했다 — 쓸 뒤 다시 읽은 값이 컨트롤 스스로 보고한 데이터(원래 값, WM_GETTEXTLENGTH, EM_GETSEL 착점)로 만든 예측과 완전히 맞을 때만 인정된다. 가려진 필드는 `readback=unavailable`, 앱이 입력을 다시整形한 경우는 `readbackMismatch=true`이며 둘 다 승격하지 않으되 ok:true는 유지된다. `caretPosition: idle|start|end`(실측 결과 WinForms EDIT에서 `EM_SETSEL(-1,-1)`는 동작하지 않으므로 end는 (len,len)를 쓰고, asked=와 applied=를 나눠 보고한다). 전송 직전 초점 재측정 `focusMoved`, 비활성화 대상은 `disabled=true`와 effect를 unverified로 고정. 스크린샷은 BitBlt를 먼저 쓰고 `captureBackend=bitblt|gdiplus`를 보고한다(정지 장면에서 두 경로가 채널 차 0·PNG 바이트 동일을 실측, 병목은 인코딩이지 캡처가 아니다). 20번째 게이트 check-shot-backend(7개 변이 모두 빨강)와 test/readback-truth.mjs(36 검증, 앱 자체 보고 값과 대조)를 추가했다. 오래된 결함도 고쳤다: `SendMessageStrW`는 user32.dll 내보내기 기호가 아니라 `replace:true`가 모든 대상에서 action_failed였다. 거절 코드 추가는 없다. 상세는 영어본이 권위이다.
+
 ## 0.5.0 — 2026-11-23
 
 > 0.5.0은 「프레임」을 호출자가 읽을 수 있게 만들고 좌표 계산을 모델의 손에서 떼어낸 릴리스입니다. 읽기 전용 액션 3종(`snapshot` 번호 요소표, `screenshot`은 매핑까지 반환, `preview`는 지점 아래 요소를 텍스트로 보고), `label`을 RuntimeId로 요소에 되돌리는 방식, `space:"image"`의 엔진 환산, 14번째 거부 코드 `stale_ref`를 추가했습니다. 계획의 「모든 요소 rect는 screenRect 안에 있어야 한다」 불변식은 실측으로 반박되었습니다(3/18/287/2720px 초과, rect는 절대 화면 좌표라 프레임과 무관). 대신 초과 요소 제외·계수, 프레임과 트리 자기신고 사각형의 상호 검사, 단일 프레임 소스 구조 게이트로 바꿨습니다. 게이트 17→19. 자세한 내용은 영어 정본 항목 참조.두 가지 추가 수정: `uia_tree_empty`가 「원래 문이 있는데 elementName 때문에 억제된」 창에 더 이상 잘못 나오지 않고(WinForms는 `unreachable`), 게이트를 간헐적으로 붉히던 커서 이동량 판정은 `GetLastInputInfo`로 사용자의 입력을 제외(입력이 있으면 age/window를 출력하고 SKIP, 엔진 자체 read-back은 여전히 엄격)했다.

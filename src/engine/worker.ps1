@@ -141,10 +141,15 @@ while ($true) {
         Write-Response $id @{ id = $id; ok = $true; result = $r }
       }
       'type' {
+        # caretPosition is forwarded as given: the engine's ValidateSet is the single place that decides
+        # what values exist, and coercing an unknown value to 'idle' here would launder a caller bug into
+        # a silent behaviour change -- the write would go through at the wrong caret and look like a
+        # successful default. A bad value must fail loudly, at the one layer that owns the vocabulary.
         $r = Invoke-WpmAction -Hwnd ([string](Get-Arg $req 'hwnd' '')) -Action type `
           -Text ([string](Get-Arg $req 'text' '')) -ElementName ([string](Get-Arg $req 'elementName' '')) `
           -Label ([int](Get-Arg $req 'label' 0)) `
           -SnapId ([string](Get-Arg $req 'snapId' '')) `
+          -CaretPosition ([string](Get-Arg $req 'caretPosition' 'idle')) `
           -Replace:([bool](Get-Arg $req 'replace' $false)) -SettleMs ([int](Get-Arg $req 'settleMs' 350)) `
           -Takeover:([bool](Get-Arg $req 'takeover' $false)) `
           -TakeoverMaxMs ([int](Get-Arg $req 'takeoverMaxMs' 10000)) `

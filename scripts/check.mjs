@@ -128,6 +128,16 @@ pass = run('screenshot hygiene (retention + PNG reality, self-tested)', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// 0.6.0-B's structural gate. The cheap BitBlt path and the CopyFromScreen fallback are measured equivalent
+// and NOT the same call, so which one produced the picture is a field the engine must produce, the host
+// must forward, and the result text must print -- and the fallback has to stay reachable, because a fast
+// path with no slow path fails exactly on the machines that need the slow path. Self-tested: seven
+// mutations, each caught by its own assertion.
+pass = run('capture backend reported, fallback reachable (self-tested)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-shot-backend.mjs', '--self-test'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 // The package that gets installed is the product. A missing engine file or a swept-in .tmp/ both
 // install cleanly and fail later, so the tarball is checked here rather than discovered at install.
 pass = run('package tarball contents', () => {

@@ -47,7 +47,16 @@ param(
   # second means it works and this instrument was measuring its own blindness. Reading the
   # text from inside the app settles it, and it is the same lesson the Chromium experiment
   # already taught: an effect oracle must never be the acted-upon element's own read path.
-  [string]$StateFile = ''
+  [string]$StateFile = '',
+  # Make the first edit box READ-ONLY. Measured on 2026-11-23 and the reason 0.6.0's readback test has a
+  # falsification arm at all: a read-only WinForms edit silently REFUSES both WM_SETTEXT and WM_CHAR --
+  # each message returns success, the value never changes -- and our WM_GETTEXT read then agrees with the
+  # app's own self-report ('readonly-seed' on both sides). So the write is delivered, the read is
+  # truthful, and the PREDICTION is what is wrong. That is the only honest shape for an arm that must
+  # refuse to upgrade `effect`: a real application behaviour, not a contrivance, and one an agent hits
+  # constantly (typing into a field the app had locked). Default off: every existing suite sees the
+  # editable control it already assumes.
+  [switch]$ReadOnlyEdit
 )
 $ErrorActionPreference = 'Stop'
 # WinForms' UIA providers are behind AppContext switches, and powershell.exe runs with
@@ -73,6 +82,7 @@ $form.ShowInTaskbar = $true
 $edit = New-Object System.Windows.Forms.TextBox
 $edit.Name = 'targetEdit'
 $edit.Text = 'abc'
+if ($ReadOnlyEdit) { $edit.ReadOnly = $true }
 $edit.Location = New-Object System.Drawing.Point(20, 20)
 $edit.Size = New-Object System.Drawing.Size(360, 26)
 $form.Controls.Add($edit)

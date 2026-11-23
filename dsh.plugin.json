@@ -1,8 +1,8 @@
 {
   "id": "dsh-external/dsh-windows-parallel-mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "main": "./lib/index.js",
-  "description": "One tool, eight actions: drive a Windows window quietly by default, and read the target as a numbered element frame. Prefers window messages (zero foreground change); falls back to UI Automation with a bounded, self-reversing focus flash (measured net return 15-95 ms); offers an opt-in takeover tier (takeoverAllowed) where the cursor moves to the action point and is always restored, with a mandatory three-phase HUD and three interruption paths; and adds snapshot/screenshot/preview, where labels address the UIA element itself and image coordinates are converted by the engine.",
+  "description": "One tool, eight actions: drive a Windows window quietly by default, and read the target as a numbered element frame. Prefers window messages (zero foreground change); falls back to UI Automation with a bounded, self-reversing focus flash (measured net return 15-95 ms); offers an opt-in takeover tier (takeoverAllowed) where the cursor moves to the action point and is always restored, with a mandatory three-phase HUD and three interruption paths; adds snapshot/screenshot/preview, where labels address the UIA element itself and image coordinates are converted by the engine; and since 0.6.0 reads a write back -- effect=readback-verified only when the field's own value matches a prediction built from the control's measurements -- with caretPosition, disabled/focus reporting, and a BitBlt capture path named in every screenshot as captureBackend.",
   "engines": {
     "dsh": ">=0.1.7-0 <0.3.0-0"
   },

@@ -97,7 +97,8 @@ try {
     cpSync(join(here, entry), join(dest, entry), { recursive: true });
   }
   writeFileSync(join(scratch, 'consumer.ts'), [
-    "import type { WpmAction, WpmArgs, RefusalCode } from '" + pkg.name + "';",
+    "import type { WpmAction, WpmArgs, WpmResult, RefusalCode } from '" + pkg.name + "';",
+    "import type { WpmEffect, WpmCaretPosition } from '" + pkg.name + "';",
     "import { ACTIONS } from '" + pkg.name + "';",
     "const a: WpmAction = 'click';",
     "const read: WpmAction = 'snapshot';",
@@ -107,12 +108,18 @@ try {
     "const args: WpmArgs = { action: a, hwnd: '1', x: 2, y: 3, takeover: true, keyInput: 'inject' };",
     "const img: WpmArgs = { action: a, hwnd: '1', x: 2, y: 3, space: 'image', shotId: 's', label: 1, snapId: 'n' };",
     "const snap: WpmArgs = { action: read, hwnd: '1', maxElements: 300, interactableOnly: true, sinceSnapId: 'n', intent: 'i' };",
+    // 0.6.0: the caret request and the fourth `effect`. Same rule as above -- a declaration that drops
+    // them compiles the old lines happily, and the shipped contract would then be a subset of the real one.
+    "const typed: WpmArgs = { action: 'type', hwnd: '1', text: 't', caretPosition: 'end' };",
+    "const caret: WpmCaretPosition = 'start';",
+    "const eff: WpmEffect = 'readback-verified';",
+    "const effRes: WpmResult = { effect: eff, action: 'type' };",
     "const code: RefusalCode = 'takeover_aborted';",
     "const stale: RefusalCode = 'stale_ref';",
     'const declared: readonly WpmAction[] = ACTIONS;',
     '// The instrument: this line MUST be rejected, by name. See the header.',
     "const mustFail: WpmAction = 'nope';",
-    'void [read, shot, args, img, snap, code, stale, declared, mustFail];',
+    'void [read, shot, args, img, snap, typed, caret, effRes, code, stale, declared, mustFail];',
     '',
   ].join('\n'));
   writeFileSync(join(scratch, 'tsconfig.json'), JSON.stringify({
@@ -131,7 +138,16 @@ try {
 
   if (errors.length === 1 && isTheInstrument(errors[0])) {
     // Expected shape: exactly the deliberate rejection, and nothing else.
-    console.log('PASS types-consumer: strict tsc accepted all 8 actions, 14 refusal codes, the image/label coordinate surface, and the exec context ('
+    // THE COUNTS ARE READ, NOT TYPED. This line said "all 8 actions, 14 refusal codes" as a literal, so
+    // growing the contract would have left a green gate reciting an outdated number -- the same drift the
+    // refusal gate exists for, except in a log line where nobody checks it.
+    const counts = (() => {
+      try {
+        const s = JSON.parse(readFileSync(join(here, 'src', 'schema', 'tools.json'), 'utf8'));
+        return { actions: s.tools.length, codes: s.refusals.length };
+      } catch { return { actions: 0, codes: 0 }; }
+    })();
+    console.log(`PASS types-consumer: strict tsc accepted all ${counts.actions} actions, ${counts.codes} refusal codes, the image/label coordinate surface, the caret/readback surface, and the exec context (`
       + tsc.split(/[\\/]/).slice(-3).join('/') + '); by-name resolution through package.json confirmed,'
       + ' and the declaration was proven real by rejecting a wrong action');
     process.exit(0);

@@ -5,7 +5,7 @@
 > Un plugin DSH che consente a un agente di pilotare **le proprie** finestre Windows — silenzioso per impostazione predefinita, visibile su richiesta. Quando una finestra accetta un messaggio Windows, il focus non viene mai sottratto. Quando solo UI Automation può raggiungerla, il focus subisce un solo lampo limitato e viene ripristinato automaticamente. Quando richiedi esplicitamente la modalità takeover, il cursore si sposta sul punto di azione e viene sempre ripristinato, con un HUD che offre tre modi per interrompere. In tutti gli altri casi rifiuta con un codice e una ragione.
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.5.0** — this document describes the contract as of that version. What
+> **Current release: 0.6.0** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
@@ -94,7 +94,7 @@ Image coordinates are never multiplied by the caller:
 
 ```jsonc
 {"action":"screenshot","hwnd":"1310720"}
-// -> screenRect=0,0,1920,1032 imageSize=1920x1032 scale=1 identity=true frame=dwm
+// -> screenRect=0,0,1920,1032 imageSize=1920x1032 scale=1 identity=true frame=dwm captureBackend=bitblt
 {"action":"click","hwnd":"1310720","space":"image","shotId":"shot-…","x":350,"y":250}
 // the ENGINE converts, then still asserts the point belongs to the target window
 ```
@@ -123,6 +123,23 @@ not overlap the capture are **excluded and counted** (`outsideFrame=…`, becaus
 point at would be a trap), the frame is cross-checked against the window rect the tree itself reports
 (`frameCheck=pass|fail|unknown`), and a structural gate pins the single-source rule by mutating a copy
 of the engine and requiring the corresponding red.
+
+### Which capture path painted the picture
+
+`captureBackend` names the producer: `bitblt` is a direct GDI `BitBlt` off the screen DC, `gdiplus` is
+`Graphics.CopyFromScreen` — either the fallback after BitBlt was refused, or nothing else. The cheap
+path replaced the old one on measured grounds (16–21 ms against 22–33 ms for a 1920×1080 grab), and the
+encoder was deliberately left alone: the PNG encode is the bottleneck (37–39 ms), so JPEG (6 ms, and it
+smears text), WIC (158 ms) and 24bpp (7 % smaller) were each measured and each rejected.
+
+Equivalence was established on a **static** scene, not by file hash — two captures of a live desktop
+happen at different instants, so their bytes cannot match, and that difference says nothing about the
+paths: identical size, both non-blank, **0 maximum per-channel difference over 17 388 sampled points**,
+byte-identical PNGs (8940 = 8940), with the comparator's self-check (two reads of one HBITMAP) also at
+0. The one difference is reported rather than assumed away: `FromHbitmap` yields `Format32bppRgb` where
+`CopyFromScreen` yields `Format32bppArgb`. A gate keeps both halves honest — the fallback reachable and
+`captureBackend` produced, forwarded and printed (`scripts/check-shot-backend.mjs`, seven mutations each
+seen red).
 
 ### Deciding outside the main context
 
@@ -158,7 +175,7 @@ reported rather than accused — but `cursorRestored=false` (borrowed and not re
 `proof=fail`.
 
 **And it says who reported the success.** Every action result carries `effect=` in the text and
-`effect` in the structured output. The three values are not degrees of confidence in the
+`effect` in the structured output. The four values are not degrees of confidence in the
 application — they name the speaker:
 
 | `effect` | who is speaking | it proves | it does **not** prove |
@@ -166,6 +183,7 @@ application — they name the speaker:
 | `unverified` | nobody | nothing | anything |
 | `reported-by-send` | the window-message channel | the message was **delivered** | that the target app processed it |
 | `reported-by-pattern` | the UI Automation pattern call | the call **returned** without throwing | that the interface actually changed |
+| `readback-verified` | the control itself, read back | the value now in the field **equals the value predicted from the field's own measurements** | that the app is *happy* — only that its value is what we said |
 
 Since 0.1.3 the effect also enters the judgment, which closes the one honest gap 0.1.2 still had:
 a still desktop could outvote a total no-op. A call whose channel reported nothing is capped at
@@ -174,6 +192,49 @@ a still desktop could outvote a total no-op. A call whose channel reported nothi
 disturb you; it never proves we accomplished anything. A single `reported-by-*` stays a `pass` with
 the caveat spelled out in the reason field (`未独立验证` — nobody observed the app), because turning
 weak-but-real evidence into a red would train its readers to ignore the verdict.
+
+### The fourth value has to be earned (0.6.0)
+
+`readback-verified` is granted only by the engine, and only when a **prediction** matches a **read**.
+The prediction is computed from measurements the control itself reported — the value it held before,
+its own `WM_GETTEXTLENGTH`, its own `EM_GETSEL` answer for where a typed character lands — and the read
+happens *after* the settle window, so an app that commits its text asynchronously is not judged against
+a half-written buffer:
+
+```jsonc
+{"action":"type","hwnd":"…","text":"XY","caretPosition":"start"}
+// -> type ok channel=message tier=quiet effect=readback-verified
+//    detail=msg=char|2 child=… caret=start asked=0 applied=0,0 readback=XYabc readbackLen=5 focusMoved=false
+```
+
+Three things it refuses to do, each measured rather than assumed:
+
+* **it does not upgrade what it cannot read.** A masked field (`ES_PASSWORD`) returns an empty string
+  while `WM_GETTEXTLENGTH` still reports the real length. That is "the control hides its text", not
+  "the field is empty": the result says `readback=unavailable`, the effect keeps whatever the write
+  earned, and no value is printed anywhere.
+* **a mismatch is data, not a failure.** A read-only WinForms edit silently refuses `WM_CHAR` — every
+  character is accepted by the API and the value never moves — while honouring `WM_SETTEXT`. On the
+  refusal the result is still `ok:true` with `readbackMismatch=true` and no upgrade; on the write that
+  lands it is `readback-verified`. No refusal code changed for this batch, on purpose: "the application
+  formatted my input" is not an error in the call. `test/readback-truth.mjs` asserts both arms against
+  the value the *application* wrote about itself, from inside its own process — a readback test that
+  compared our write to our read would be grading homework in our own class, and this repo has already
+  been caught doing exactly that.
+* **the naive guess is not the model.** Text is not appended: it lands at the caret, and a field that
+  never held focus has its caret at 0 (so `abc` + `XY` is `XYabc`). That is why `caretPosition` exists
+  and why the result prints `asked=` and `applied=` separately — `EM_SETSEL(-1,-1)` is documented as
+  "document end" and measured as a no-op on WinForms EDIT, so `end` is `EM_SETSEL(len,len)` with `len`
+  read from the control. On a buffer containing newlines that numeric end can land inside the text
+  (`asked=6 applied=4,4`), which is reported instead of hidden; `idle` touches nothing at all. The UIA
+  `value` channel replaces the whole value and has no caret to move, so it answers
+  `caretIgnored=value-pattern` rather than pretending to honour it.
+
+Two more facts ride in the same `detail`, both warnings and neither a refusal: `focusMoved=true` when
+the foreground or the focused control differs between the two measurements taken around the send, and
+`disabled=true` for a target window that is greyed out — Windows keeps answering our messages while
+throwing the input away, so a disabled target loses the right to an `effect` claim
+(`effect=unverified`) without becoming an error.
 
 ## The takeover tier (opt-in)
 
@@ -253,8 +314,9 @@ degradation.
 ## Typed surface
 
 `types/index.d.ts` is written by hand, not emitted from an implementation. It covers the whole
-contract: the eight actions, every argument including the takeover fields and the image-space /
-label surface, and all fourteen refusal codes as a closed union.
+contract: the eight actions, every argument including the takeover fields, the image-space / label
+surface and 0.6.0's `caretPosition`, all fourteen refusal codes as a closed union, and `effect` as its
+own four-value union (`WpmEffect`) beside `WpmCaptureBackend` and `WpmFrameSource`.
 
 Its wiring is measured in both resolution modes a consumer can use, rather than assumed from the
 presence of a file:
@@ -349,6 +411,33 @@ unmeasured end-to-end and is stated as such in [docs/refusals.md](docs/refusals.
   subclass returning `HTTRANSPARENT` outside the button rect works — measured `-1` on empty space,
   `WindowFromPoint` no longer returning the HUD, and `HTCLIENT` on the button. That is what
   `hud.ps1` ships.
+
+### 0.6.0's measurements (all re-runnable, probe scripts under `.tmp/` in the repository)
+
+- **The read-back exists and is truthful** — three window classes (`Edit`,
+  `WindowsForms10.EDIT.app.*`, `WindowsForms10.RichEdit20W.app.*`) all return the written value through
+  `WM_GETTEXT` cross-process, and in four cases the value equals what the *application* reported about
+  itself from inside its own process (168–241 ms to observe, on the app's 400 ms timer).
+- **A password field reports a length but no text** — `ES_PASSWORD`: `WM_GETTEXT` returns the empty
+  string while `WM_GETTEXTLENGTH` returns the real length. Hence `readback=unavailable`, never "empty".
+- **`EM_SETSEL(-1,-1)` does not mean "the end" on WinForms EDIT** — the selection stayed `0,0` and the
+  typed character went to the front; `EM_SETSEL(len,len)` gave `abcY`. On a buffer holding `CRLF` the
+  numeric end landed at `4,4` for a reported length of `6` — measured, therefore reported as
+  `asked=`/`applied=` rather than papered over. A plain Win32 `EDIT` that never held focus accepts every
+  `WM_CHAR` and changes nothing, even with `ES_NOHIDESEL`: the case the old `reported-by-send` was
+  laundering, and the reason this batch exists.
+- **A read-only edit refuses `WM_CHAR` and honours `WM_SETTEXT`** — the falsification arm of
+  `test/readback-truth.mjs`, chosen over two candidates that measurement eliminated (a bare `LF` is
+  preserved verbatim, so it agrees; WinForms enforces `MaxLength` in its own `WM_CHAR` handler, so a
+  programmatic `WM_SETTEXT` bypasses it, as does `EM_SETLIMITTEXT` set from outside).
+- **BitBlt halves the capture and leaves the bottleneck where it is** — 16–21 ms against 22–33 ms for a
+  1920×1080 grab, PNG encode 37–39 ms in both paths, capture+encode 12–16 ms on a 642×432 window. JPEG
+  (6 ms) and WIC (158 ms) measured and rejected, 24bpp measured at 7 % of the size and rejected.
+- **`replace:true` threw on every target until 0.6.0** — the `WM_SETTEXT` binding was declared as
+  `SendMessageStrW`, an export `user32.dll` does not have: the call raised
+  `EntryPointNotFoundException` on first use and surfaced as `action_failed`. No test in the repository
+  exercised `replace:true` through the message door, which is why the fix ships with an arm that does
+  (`test/readback-truth.mjs` A1). Found by running the import instead of trusting its name.
 
 ## Verifying the copy you actually installed
 

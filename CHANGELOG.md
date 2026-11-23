@@ -5,6 +5,83 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.6.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+
+**`type` stops reporting the send and starts reporting the field, and the screenshot says which path
+painted it.** Four input-reliability additions on the existing `type` path, one capture swap, one gate,
+and a shipped defect that only this batch's test found. No refusal code changed anywhere in this
+release, deliberately: every new fact is a state of the target or of the read, not an error in the
+call, and a caller that branches on codes must keep branching on the same twelve.
+
+### Added — reading the write back
+
+- **`effect=readback-verified`, the fourth value.** After the settle window the engine reads the value
+  back — `WM_GETTEXT` on the message door, `Current.Value` on the UIA `value`/`legacy` patterns — and
+  grants the value only when the read equals a prediction built from measurements **the control
+  itself** reported: the value it held before, its own `WM_GETTEXTLENGTH`, its own `EM_GETSEL` answer
+  for where a typed character lands. A field that does not expose its text (measured: `ES_PASSWORD`
+  returns an empty string while the length stays real) says `readback=unavailable` and is not upgraded;
+  a value that comes back different says `readbackMismatch=true` and is not upgraded — and the call is
+  still `ok:true`, because an application that reformats input has not failed.
+- **`caretPosition: idle | start | end`** on `type`, message door. `idle` touches nothing; `start` is
+  `EM_SETSEL(0,0)`; `end` is `EM_SETSEL(len,len)` with `len` read from the control — **not** the
+  documented `-1`, which measured as a no-op on WinForms EDIT (the typed character went to the front).
+  The result reports `asked=` and `applied=` separately because on a buffer holding newlines the
+  numeric end can land inside the text (`asked=6 applied=4,4`); that is stated, not smoothed over. The
+  UIA `value` channel replaces the whole value and has no caret to move, so it answers
+  `caretIgnored=value-pattern` instead of pretending.
+- **Focus re-measured at the moment of sending**: two `Get-WpmFocusEntry` readings around the door call;
+  a difference reports `focusMoved=true`. A warning, never a refusal — refusing here would kill correct
+  writes to be safe about a fact the readback already judges better.
+- **Disabled-target detection** via `IsWindowEnabled`: `disabled=true` in `detail` and `effect` pinned
+  to `unverified`. Measured reason: a disabled window answers every message we send — `WM_SETTEXT` even
+  still lands — while Windows throws a click at it away, so the one thing it must not earn is an effect
+  claim.
+- **`captureBackend=bitblt|gdiplus`** on every screenshot, in the text and the structured result.
+
+### Changed — the capture path
+
+- `Get-WpmScreenshot` now prefers a direct GDI `BitBlt` off the **screen** DC and falls back to
+  `Graphics.CopyFromScreen`. Same source semantics on purpose (an occluding window stays visible in the
+  picture, the coordinates stay the ones a click uses); `GetWindowDC`/`PrintWindow` would have been a
+  different product. Measured on this host: capture 16–21 ms against 22–33 ms for 1920×1080, PNG encode
+  37–39 ms in both paths — **the encoder is the bottleneck, not the capture**, which is why JPEG (6 ms,
+  and text smears), WIC (158 ms) and 24bpp (7 % smaller) were each measured and each rejected. A
+  separate probe established equivalence on a **still** scene rather than by file hash, because two
+  captures of a live desktop cannot match by construction: identical size, both non-blank, 0 maximum
+  per-channel difference over 17 388 sampled points, byte-identical PNGs — with the reported difference
+  that `FromHbitmap` yields `Format32bppRgb` where `CopyFromScreen` yields `Format32bppArgb`.
+
+### Fixed
+
+- **`type` with `replace:true` threw on every target since the message door existed.** The `WM_SETTEXT`
+  binding was declared as `SendMessageStrW`, an export `user32.dll` does not have, so the first call
+  raised `EntryPointNotFoundException` and surfaced as `action_failed`. No gate could see it — the parse
+  gate checks syntax, and no test in the repository drove `replace:true` through the door. The entry
+  point is now pinned explicitly and the arm ships in `test/readback-truth.mjs`.
+- `scripts/check-types.mjs` reported "all 8 actions, 14 refusal codes" from a hardcoded string; the
+  counts are read from `src/schema/tools.json` now, so growing the contract cannot leave a green gate
+  reciting an outdated number.
+
+### Gates and tests
+
+- Gate 20: `scripts/check-shot-backend.mjs --self-test` — fast path called, GDI objects released in a
+  `finally`, the fallback reachable and guarded, `captureBackend` produced → forwarded → printed. Seven
+  mutations, each seen red; the first run of the gate caught two of its own vacuous assertions this way.
+- `test/readback-truth.mjs` (new, 36 assertions) grades against the value the **application** wrote
+  about itself from inside its own process, never against our own read. Its falsification arm is a
+  read-only WinForms edit — which silently refuses `WM_CHAR` while honouring `WM_SETTEXT` — so the run
+  contains both a refusal that must not upgrade and, on the same control, a write that must.
+  Two other falsification candidates were eliminated by measurement first (a bare `LF` is preserved
+  verbatim; WinForms enforces `MaxLength` in its own handler, not through `EM_SETLIMITTEXT`).
+- `test/plugin-test.mjs` carries the four-value `effect` list and asserts the host never upgrades an
+  engine result on its own. Full gate: **20 arms, `GATE GREEN` ×3**; desktop regression
+  hud / takeover / keyinject / signal / overlay / marker all pass.
+- Zero install dependencies unchanged: no new package, no network surface, no mouse injection
+  (`check-no-cursor-control` still green with the same two whitelisted uses).
+
 ## 0.5.0 — 2026-11-23
 
 > Published 2026-11-23T14:19:37.293Z (registry `time` for 0.5.0, read from the packument, not from a commit date).

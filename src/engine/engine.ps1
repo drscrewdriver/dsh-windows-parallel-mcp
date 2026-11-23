@@ -178,7 +178,15 @@ function Invoke-WpmAction {
     [string]$Intent = '',
     [bool]$FullScreen = $false,
     [int]$MaxWidth = 0,
-    [int]$ShotsKeep = 10
+    [int]$ShotsKeep = 10,
+    # ---- 0.6.0: where the caret should be when the message door types (type only) ----------------
+    # `idle` is the existing behaviour and stays the default: nothing is touched, so an upgrade cannot
+    # start moving carets on its own. `end` is implemented as EM_SETSEL(len,len) with len read from the
+    # control, NOT as the documented -1 -- measured on WinForms EDIT, EM_SETSEL(-1,-1) leaves the
+    # selection at 0,0 and the character lands at the FRONT (findings 8.2). The UIA `value` channel
+    # replaces the whole value and has no caret to place, so it reports caretIgnored rather than
+    # pretending the request was honoured.
+    [ValidateSet('idle', 'start', 'end')][string]$CaretPosition = 'idle'
   )
   $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $h = [IntPtr][int64]$Hwnd
@@ -301,6 +309,10 @@ function Invoke-WpmAction {
       $result.scale = [double]$shot.scale
       $result.identity = [bool]$shot.identity
       $result.frame = [string]$shot.frame
+      # WHICH CAPTURE PATH PRODUCED THE PICTURE. Reported on every screenshot, not only when the cheap
+      # path failed: a field that appears only in the exceptional case is how a silent substitution looks.
+      $result.captureBackend = [string]$shot.captureBackend
+      if ($shot.captureNote) { $result.captureNote = [string]$shot.captureNote }
       $result.dpiAware = [bool]$shot.dpiAware
       $result.bytes = [long]$shot.bytes
       $result.shotsKeep = [int]$shot.shotsKeep
@@ -352,6 +364,15 @@ function Invoke-WpmAction {
     $result.refusal = 'no_hwnd'; $result.reason = 'the hwnd does not identify a live window'
     return $result
   }
+
+  # ---- 0.6.0: a DISABLED target is a fact about the target, and Windows discards input to it -----
+  # Measured (findings 8.1): with EnableWindow(false) every message this engine sends still RETURNS --
+  # WM_SETTEXT and WM_CHAR both answer as if they worked, and the control simply does not take the click.
+  # This is deliberately not a new refusal code: 'disabled' is a state of the target, not an error in the
+  # call, and the caller may well want to know that the window is there but greyed out. What it does cost
+  # is the right to claim an effect: `effect` is pinned to 'unverified' for a disabled target, so a
+  # green-looking result cannot be produced by a window that was throwing our input away.
+  $targetDisabled = -not [WpmWin]::IsWindowEnabled($h)
 
   # ---- 0.5.0: image coordinates are converted by the ENGINE, before anything is probed ---------
   # Why here: a bogus shotId must cost zero target probing, and the converted point then flows through
@@ -537,6 +558,13 @@ function Invoke-WpmAction {
   # NOT already doing it. Kept short (80ms): a few samples, no perceptible slowdown.
   $controlSamples = Get-WpmProofWindow -Ms 80
   $tAct = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  # 0.6.0 locals. Declared here rather than inside the dispatch branches so that a channel which never
+  # armed a readback (invoke/toggle/select, a refusal, an exception) is the ABSENCE of a plan and not a
+  # leftover value from the previous call -- this worker is long-lived, and a stale plan would grade
+  # today's action against yesterday's field.
+  $focusBeforeDoor = $null
+  $focusAfterDoor = $null
+  $readbackPlan = $null
 
   # ---- the takeover choreography (spec.md §3) -------------------------------------------------
   # Everything from here to the finally exists because R3 promises three things the quiet tier never
@@ -574,6 +602,11 @@ function Invoke-WpmAction {
   try {
     # THE CURSOR MOVE LIVES INSIDE THE SAME try THAT OWNS THE RESTORE (spec.md §6 G4): an exception in
     # the door call below still reaches the finally that puts the pointer back.
+    #
+    # 0.6.0: the focus table is re-read HERE, at the moment of sending, not reused from the one captured
+    # before the probe. See the focusMoved block after the settle window for why this is a warning and
+    # never a refusal.
+    $focusBeforeDoor = Get-WpmFocusEntry
     if ($takeover -and -not $abortedBeforeAct -and $Action -eq 'click' -and $X -ge 0 -and $Y -ge 0) {
       $cursorEntry = Set-WpmCursorTakeover -X $X -Y $Y
       $result.cursorMoved = if ($cursorEntry.applied) { 'true' } else { 'false' }
@@ -600,8 +633,26 @@ function Invoke-WpmAction {
           $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
           return $result
         }
-        $r = [WpmWin]::MessageText($target, $Text, [bool]$Replace)
-        $result.detail = "msg=$r child=$($target.ToInt64())"
+        if ([WpmWin]::IsWindowEnabled($target) -eq $false) { $targetDisabled = $true }
+        # THE PRE-READ. Taken BEFORE the write, because the expected post-write value is only computable
+        # from the value the control held plus the insertion point the CONTROL reports (its own EM_GETSEL
+        # answer) -- not from an assumption that a write appends. Measured: an unfocused WinForms TextBox
+        # inserts at 0, so 'abc' + 'XYZ' is 'XYZabc'; the model has to know both numbers or the
+        # comparison grades its own guess.
+        $preRead = Read-WpmControlText -Hwnd $target
+        $w = [WpmWin]::MessageTextAt($target, $Text, [bool]$Replace, $CaretPosition)
+        $mode = [string]$w[0]
+        $sentChars = [int]$w[1]
+        $selStart = [int]$w[2]; $selEnd = [int]$w[3]
+        $caretAskedAt = if ($w.Count -gt 4) { [int]$w[4] } else { -1 }
+        # Readback runs AFTER the settle window (the proof sampling is the settle), so an app that commits
+        # its value asynchronously is not judged against a half-written buffer (plan R2).
+        $readbackPlan = @{
+          kind = 'message'; hwnd = $target; mode = $mode
+          pre = $preRead; selStart = $selStart; selEnd = $selEnd; text = $Text; replace = [bool]$Replace
+        }
+        $caretNote = "caret=$CaretPosition asked=$(if ($caretAskedAt -ge 0) { $caretAskedAt } else { '(untouched)' }) applied=$selStart,$selEnd"
+        $result.detail = "msg=$mode|$sentChars child=$($target.ToInt64()) $caretNote" + $(if (-not $preRead.exposesText) { ' readbackPre=unavailable' } else { '' })
         $result.effect = 'reported-by-send'
       } elseif ($Action -eq 'click') {
         if ($X -lt 0 -or $Y -lt 0) {
@@ -675,17 +726,43 @@ function Invoke-WpmAction {
         $pat.Invoke()
       } elseif ($kind -eq 'value') {
         $pat = $el.GetCurrentPattern($pats.value)
+        # THE PRE-READ THROUGH THE SAME PATTERN that writes. The UIA `value` channel is a whole-value
+        # replace, so the expected after-value is computable exactly -- and the current value is read
+        # from the pattern, not from a window message, because this is the channel the write went through.
+        $preVal = ''
+        $preOk = $false
+        try { $preVal = [string]$pat.Current.Value; $preOk = $true } catch { $preOk = $false }
         $pat.SetValue($(if ($Replace) { $Text } else { [string]$pat.Current.Value + $Text }))
+        $readbackPlan = @{
+          kind = 'uia-value'; pat = $pat; mode = 'value'
+          expected = $(if ($Replace) { $Text } else { $preVal + $Text })
+          preOk = $preOk; pre = $preVal; text = $Text; replace = [bool]$Replace
+        }
       } elseif ($kind -eq 'toggle') {
         $pat = $el.GetCurrentPattern($pats.toggle); $pat.Toggle()
       } elseif ($kind -eq 'select') {
         $pat = $el.GetCurrentPattern($pats.select); $pat.Select()
       } elseif ($kind -eq 'legacy') {
-        $pat = $el.GetCurrentPattern($pats.legacy); $pat.SetValue($Text)
+        $pat = $el.GetCurrentPattern($pats.legacy)
+        $preVal = ''; $preOk = $false
+        try { $preVal = [string]$pat.Current.Value; $preOk = $true } catch { $preOk = $false }
+        $pat.SetValue($Text)
+        $readbackPlan = @{
+          kind = 'uia-legacy'; pat = $pat; mode = 'legacy'
+          expected = $Text; preOk = $preOk; pre = $preVal; text = $Text; replace = $true
+        }
       }
       $result.detail = "uia=$kind"
+      # A caret request on this channel has no meaning -- `value` replaces the whole string, there is no
+      # insertion point to move. Saying so is the difference between honouring a parameter and quietly
+      # dropping it (the same discipline as `frame` and, in 0.6.0-B, `captureBackend`: a path that did
+      # not do what you asked says so in the result).
+      if ($CaretPosition -ne 'idle' -and $readbackPlan) {
+        $result.detail += " caretIgnored=$kind-pattern"
+      }
       $result.effect = 'reported-by-pattern'
     }
+    $focusAfterDoor = Get-WpmFocusEntry
   } catch {
     $result.refusal = 'action_failed'
     $result.reason = 'the channel call threw: ' + $_.Exception.Message
@@ -729,6 +806,84 @@ function Invoke-WpmAction {
   # and lives in lib/proof-window.mjs -- the engine only produces samples.
   $result.proofControl = $controlSamples
   $result.proofSamples = Get-WpmProofWindow -Ms $SettleMs
+
+  # ---- 0.6.0 READBACK: the fourth `effect`, earned by reading the value back -------------------
+  # This runs AFTER the settle window on purpose (plan R2): an application that commits its text
+  # asynchronously must not be judged against a half-written buffer. The rule is narrow and it is the
+  # whole feature -- `readback-verified` is used ONLY when the value read back equals the value the
+  # model predicted from measurements the CONTROL reported. Anything else keeps the effect the write
+  # itself earned, and the reason travels in `detail`.
+  #
+  # A mismatch is NOT a failure. The app may legitimately reformat what it was given (case folding,
+  # trimming, a mask, a numeric parse), and `unreachable`/`action_failed` must not be repurposed to
+  # mean "the value is not what I expected" -- so the refusal set is unchanged by this block, by design.
+  if ($readbackPlan) {
+    $expected = $null
+    $expectedHow = ''
+    if ($readbackPlan.kind -eq 'message') {
+      $post = Read-WpmControlText -Hwnd $readbackPlan.hwnd
+      $pre = $readbackPlan.pre
+      if ($readbackPlan.mode -eq 'settext') {
+        $expected = [string]$readbackPlan.text; $expectedHow = 'settext-equals-text'
+      } elseif (-not $pre.exposesText -or $pre.truncated) {
+        $expected = $null; $expectedHow = $(if (-not $pre.exposesText) { 'pre-read-unavailable' } else { 'pre-read-truncated' })
+      } else {
+        $b = [string]$pre.text
+        $s = [int]$readbackPlan.selStart; $e = [int]$readbackPlan.selEnd
+        if ($s -lt 0) { $s = 0 }
+        if ($e -lt $s) { $e = $s }
+        if ($s -gt $b.Length) { $s = $b.Length }
+        if ($e -gt $b.Length) { $e = $b.Length }
+        $expected = $b.Substring(0, $s) + [string]$readbackPlan.text + $b.Substring($e)
+        $expectedHow = "insert-at-$s-$e"
+      }
+      $postRef = $post
+    } else {
+      $postVal = ''; $postOk = $false
+      try { $postVal = [string]$readbackPlan.pat.Current.Value; $postOk = $true } catch { $postOk = $false }
+      $expected = [string]$readbackPlan.expected; $expectedHow = 'pattern-current-value'
+      $postRef = @{ ok = $postOk; exposesText = $postOk; truncated = $false; text = $postVal; chars = $postVal.Length }
+    }
+
+    if (-not $postRef.exposesText) {
+      # Not "empty": the read produced nothing usable. Reporting readback=unavailable keeps the two
+      # apart, which is the difference between "this field hides its text" and "this field is empty".
+      $result.detail += ' readback=unavailable'
+    } elseif ($null -eq $expected) {
+      $result.detail += " readback=unmodelled($expectedHow)"
+    } else {
+      $shown = [string]$postRef.text
+      if ($shown.Length -gt 120) { $shown = $shown.Substring(0, 119) + [char]0x2026 }
+      $result.detail += " readback=$shown readbackLen=$([string]$postRef.text.Length)"
+      if ($postRef.text -eq $expected) {
+        $result.effect = 'readback-verified'
+      } else {
+        # The mismatch is carried as data because a caller that only reads `effect` must still be able
+        # to tell "nothing reported success" from "it reported success and the value says otherwise".
+        $result.detail += ' readbackMismatch=true'
+      }
+    }
+  }
+
+  # ---- 0.6.0 focus re-check at the moment of sending ------------------------------------------
+  # A WARNING, never a refusal. The desktop can move between the probe and the send, and on the
+  # bounded-flash tier the move is the channel working as documented. Refusing on a mismatch would
+  # kill correct writes to be safe about a fact the readback already judges better -- so the field
+  # says what was measured and lets the caller weigh it.
+  if ($focusBeforeDoor -and $focusAfterDoor) {
+    $moved = ($focusBeforeDoor.fgHwnd -ne $focusAfterDoor.fgHwnd) -or
+             ($focusBeforeDoor.focusHwnd -ne $focusAfterDoor.focusHwnd)
+    $result.detail += " focusMoved=$($moved.ToString().ToLower())"
+  }
+
+  # ---- 0.6.0 the disabled target, recorded last so it cannot be overridden ---------------------
+  # `effect` is pinned to 'unverified' here even if a readback matched: a write into a greyed-out
+  # window is not an effect the owner can rely on, and the one claim this field makes is that the
+  # channel's own report is not being dressed up as a verified state change.
+  if ($targetDisabled) {
+    $result.detail += ' disabled=true'
+    $result.effect = 'unverified'
+  }
 
   # Did the action actually take the owner's focus? Measured, not assumed -- the quiet tier is
   # expected to say no and the flash tier yes, and a run where both say the same thing is a broken

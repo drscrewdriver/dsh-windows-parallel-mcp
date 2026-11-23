@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.6.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+
+> 0.6.0 让 `type` 从「发出去了」抬到「字段里确实是这个值」：新增第四种 `effect=readback-verified`（只有把写入后读回的值与「用控件自己报的数据」——原值、WM_GETTEXTLENGTH、EM_GETSEL 落点——构造出的预测完全一致时才授予；掩码字段报 `readback=unavailable`，应用改写了输入报 `readbackMismatch=true`，两者都不升级且仍是 ok:true）；`caretPosition: idle|start|end`（实测 `EM_SETSEL(-1,-1)` 在 WinForms EDIT 上是空操作，所以 end 用 (len,len)，并把 asked= 与 applied= 分开回报）；发送瞬间焦点复测 `focusMoved`，禁用目标 `disabled=true` 且 effect 钉为 unverified；截图优先走 BitBlt 并回报 `captureBackend=bitblt|gdiplus`（静止场景实测两路 0 通道差、PNG 字节相同；瓶颈是 PNG 编码不是捕获）。新增第 20 道门禁 check-shot-backend（7 个变异全见红）与 test/readback-truth.mjs（36 断言，按应用进程内自报值验收，非空转臂用「只读框静默拒绝 WM_CHAR 而接受 WM_SETTEXT」这一实测现象）。另修一个长期缺陷：`SendMessageStrW` 不是 user32.dll 的导出，`replace:true` 此前在每个目标上都报 action_failed。拒绝码零新增。详情见英文权威条目。
+
 ## 0.5.0 — 2026-11-23
 
 > 0.5.0 把「帧」变成调用方可读的东西，并把坐标换算从模型手里拿走：新增三个只读动作（`snapshot` 编号元素表、`screenshot` 连映射一起返回、`preview` 用文本报出点位下的元素）、`label` 按 RuntimeId 回指元素、`space:"image"` 由引擎换算，以及第 14 个拒绝码 `stale_ref`。计划中的「元素 rect 必须被 screenRect 包含」被实测推翻（真实窗口出现 3/18/287/2720px 的越界，且 rect 本就是绝对屏幕坐标、与帧无关），改为：越界元素排除并计数、帧与树自报窗口矩形互校（frameCheck/frameInset）、以及「唯一的帧源」结构门禁。全量门禁 17→19，新增 geometry-truth 与 snapshot-test 两套独立 oracle 验收。详情见英文权威条目。另修两处：`uia_tree_empty` 不再对「本来有门、只是被 elementName 抑制」的窗口误报（WinForms 现在诚实回 `unreachable`），以及卡住门禁的偶发红——光标漂移断言改用 `GetLastInputInfo` 排除主人自己动鼠标（有输入则 SKIP 并打印 age/window），引擎自报的精确 read-back 仍是硬断言。

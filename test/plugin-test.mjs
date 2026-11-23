@@ -224,7 +224,11 @@ ok('a missing required argument is refused with a code', missingArg.ok === false
 // `proof=pass` could not be told apart from "the message was delivered and the app ignored it".
 // Asserted on the shipped projection with hand-authored engine results: no desktop involved, so this
 // arm cannot pass by luck.
-const EFFECTS = ['unverified', 'reported-by-send', 'reported-by-pattern'];
+// 0.6.0 added the fourth value. It is listed here rather than inferred: this arm is what keeps
+// lib/index.js's `effect` comment, README's table, types' WpmEffect, and the engine's own vocabulary in
+// one sentence -- the README table and this list are the two copies, and a drift between them is exactly
+// what scripts/check-refusals.mjs was written to prevent for refusal codes.
+const EFFECTS = ['unverified', 'reported-by-send', 'reported-by-pattern', 'readback-verified'];
 {
   const quietSamples = Array.from({ length: 12 }, (_, i) => ({
     ts: 1000 + i * 20, cx: 40, cy: 60, fg: '1', focus: '2', inputAgeMs: 5000 + i * 20,
@@ -238,6 +242,23 @@ const EFFECTS = ['unverified', 'reported-by-send', 'reported-by-pattern'];
       projected.text);
     ok(`  ... and structurally, with a legal value`, EFFECTS.includes(projected.effect), String(projected.effect));
   }
+  // THE HOST NEVER UPGRADES. `readback-verified` is the engine's to grant; a projection that promoted
+  // `reported-by-send` on its own would put the strongest claim in the product on the weakest evidence.
+  const notUpgraded = mod._internals.formatResult('type', {
+    channel: 'msg', tier: 'quiet', effect: 'reported-by-send', focusTaken: 'false',
+    detail: 'msg=char|3 readback=abc readbackMismatch=true',
+    proofSamples: quietSamples, proofControl: quietSamples,
+  });
+  ok('a mismatching readback is carried through, not rewritten',
+    notUpgraded.effect === 'reported-by-send' && /readbackMismatch=true/.test(notUpgraded.text),
+    `${notUpgraded.effect} :: ${notUpgraded.text}`);
+  const verbatim = mod._internals.formatResult('type', {
+    channel: 'msg', tier: 'quiet', effect: 'readback-verified', focusTaken: 'false',
+    detail: 'msg=settext|5 readback=Readback-7 readbackLen=9',
+    proofSamples: quietSamples, proofControl: quietSamples,
+  });
+  ok('and the upgrade survives the projection untouched', verbatim.effect === 'readback-verified',
+    String(verbatim.effect));
   // An engine result that never set effect must not invent a nicer word for itself.
   const silent = mod._internals.formatResult('click', { channel: 'msg', tier: 'quiet' });
   ok('a result with no effect defaults to unverified', silent.effect === 'unverified', String(silent.effect));

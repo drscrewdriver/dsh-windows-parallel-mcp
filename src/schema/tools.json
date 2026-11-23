@@ -98,7 +98,7 @@
       "name": "wpm_type",
       "action": "type",
       "engine": "Invoke-WpmAction -Action type",
-      "description": "Write text into the named window: either the first editable classic child (quiet tier) or a UIA element named by the caller (bounded-flash tier). No keystrokes are synthesized; the text is delivered through the window message or the pattern itself.",
+      "description": "Write text into the named window: either the first editable classic child (quiet tier) or a UIA element named by the caller (bounded-flash tier). No keystrokes are synthesized; the text is delivered through the window message or the pattern itself. WHAT HAPPENS AFTER THE WRITE IS READ BACK: the engine reads the control's value again (WM_GETTEXT on the message door, ValuePattern/LegacyIAccessible Current.Value on UIA) and only reports effect=readback-verified when the value it read equals the value predicted from what the control itself reported. A field that does not expose its text yields readback=unavailable and no upgrade; a value that came back different yields readbackMismatch=true while the effect stays what the write earned -- the application may legitimately reformat input, so a mismatch is data, not a refusal.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -108,6 +108,7 @@
           "label": { "type": "integer", "minimum": 1, "description": "Element number from wpm_snapshot: write into that element through its UIA pattern. A faster, unambiguous alternative to elementName on a tree you have already read." },
           "snapId": { "type": "string", "description": "The snapId the label came from; a superseded snapId is refused with stale_ref." },
           "replace": { "type": "boolean", "default": false, "description": "Replace the existing value instead of appending to it." },
+          "caretPosition": { "type": "string", "enum": ["idle", "start", "end"], "default": "idle", "description": "Message door only: where the caret should be before the characters are sent. 'idle' touches nothing (the caret is wherever the control left it, which for a never-focused field is position 0 -- measured). 'start' is EM_SETSEL(0,0); 'end' is EM_SETSEL(len,len) with len read from the control, because EM_SETSEL(-1,-1) is documented as document-end and measured as no-op on WinForms EDIT. On a value containing newlines the numeric end can land inside the buffer, so the result reports the requested and the applied pair and the readback judges. The UIA value channel replaces the whole value and has no caret to move: it answers caretIgnored=value-pattern instead of pretending." },
           "settleMs": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 350, "description": "How long to let the app commit its state before the effect is judged." },
           "takeover": { "type": "boolean", "default": false, "description": "Take the takeover tier: the HUD is shown, the focus is held until the action ends, and (with keyInput) text may be typed into the foreground target." },
           "takeoverMaxMs": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 10000, "description": "Takeover only: how long the action may hold the cursor/focus." },
@@ -116,6 +117,7 @@
         "required": ["hwnd", "text"],
         "additionalProperties": false
       },
+      "notes_0_6_0": "0.6.0 adds readback + caretPosition and changes nothing in this refusals list: disabled targets, focus movement and a mismatching readback are reported in detail/effect, not as new codes -- they are states of the target, not errors in the call.",
       "refusals": ["no_hwnd", "paused", "elevated_target", "unreachable", "uia_tree_empty", "uia_probe_failed", "terminal_no_door", "action_failed", "restore_failed", "takeover_unavailable", "keyinject_unavailable", "takeover_aborted"]
     },
     {

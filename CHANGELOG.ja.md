@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.6.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+
+> 0.6.0 は `type` を「送信した」から「欄に実際にその値が入った」へ引き上げる。第4の `effect=readback-verified` を追加（書き込み後に読み戻した値が、コントロール自身が報告したデータ——元の値・WM_GETTEXTLENGTH・EM_GETSEL の着地点——から作った予測と完全一致した場合だけが認定される。マスクされた欄は `readback=unavailable`、アプリが入力を整形し直した場合は `readbackMismatch=true` で、どちらも昇格しないが ok:true のまま）。`caretPosition: idle|start|end`（実測では WinForms EDIT の `EM_SETSEL(-1,-1)` は無効だったため end は (len,len) を使い、asked= と applied= を分けて報告）。送信直前の焦点再測定 `focusMoved`、無効化された対象は `disabled=true` かつ effect を unverified に固定。スクリーンショットは BitBlt を優先し `captureBackend=bitblt|gdiplus` を報告（静止シーンで两経路のチャンネル差 0・PNG バイト一致が実測済み。ボトルネックは符号化であり取得ではない）。第20ゲート check-shot-backend（7 変異すべて赤）と test/readback-truth.mjs（36 検証、アプリ側自己報告値と照合）を追加。長年の欠陥も修正：`SendMessageStrW` は user32.dll のエクスポートではないため、`replace:true` はあらゆる対象で action_failed になっていた。拒否コードの追加はゼロ。詳細は英語版が権威。
+
 ## 0.5.0 — 2026-11-23
 
 > 0.5.0 は「フレーム」を呼び出し側が読めるものにし、座標計算をモデルの手から取り上げるリリース。読み取り専用の 3 アクション（`snapshot` の番号付き要素表、`screenshot` は対応表ごと返す、`preview` は点の下の要素をテキストで報告）、`label` を RuntimeId で要素に戻す仕組み、`space:"image"` のエンジン側換算、14 番目の拒否コード `stale_ref` を追加。計画にあった「要素 rect は screenRect に含まれる」不変条件は実測で否定された（3/18/287/2720px のはみ出し、かつ rect は絶対スクリーン座標でフレーム非依存）ため、はみ出し要素の除外＋計数、フレームとツリー自己申告矩形の相互検査、単一フレーム源の構造ゲートに置き換えた。ゲートは 17→19。詳細は英語の正式項目を参照。さらに 2 件修正：`uia_tree_empty` が「本来ドアがあるのに elementName で抑制されただけ」の窓に誤って出なくなり（WinForms は `unreachable` を返す）、ゲートを稀に赤くしていたカーソル移動量の判定は `GetLastInputInfo` で操作者の入力を除外（入力があれば age/window を添えて SKIP、エンジン自身の read-back は厳格なまま）した。
