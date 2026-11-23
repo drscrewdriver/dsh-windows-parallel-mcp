@@ -7,7 +7,7 @@ one is a promise to anyone installing it.
 
 ## 0.6.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+> Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).
 
 **`type` stops reporting the send and starts reporting the field, and the screenshot says which path
 painted it.** Four input-reliability additions on the existing `type` path, one capture swap, one gate,

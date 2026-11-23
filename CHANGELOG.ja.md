@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.6.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+> Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).
 
 > 0.6.0 は `type` を「送信した」から「欄に実際にその値が入った」へ引き上げる。第4の `effect=readback-verified` を追加（書き込み後に読み戻した値が、コントロール自身が報告したデータ——元の値・WM_GETTEXTLENGTH・EM_GETSEL の着地点——から作った予測と完全一致した場合だけが認定される。マスクされた欄は `readback=unavailable`、アプリが入力を整形し直した場合は `readbackMismatch=true` で、どちらも昇格しないが ok:true のまま）。`caretPosition: idle|start|end`（実測では WinForms EDIT の `EM_SETSEL(-1,-1)` は無効だったため end は (len,len) を使い、asked= と applied= を分けて報告）。送信直前の焦点再測定 `focusMoved`、無効化された対象は `disabled=true` かつ effect を unverified に固定。スクリーンショットは BitBlt を優先し `captureBackend=bitblt|gdiplus` を報告（静止シーンで两経路のチャンネル差 0・PNG バイト一致が実測済み。ボトルネックは符号化であり取得ではない）。第20ゲート check-shot-backend（7 変異すべて赤）と test/readback-truth.mjs（36 検証、アプリ側自己報告値と照合）を追加。長年の欠陥も修正：`SendMessageStrW` は user32.dll のエクスポートではないため、`replace:true` はあらゆる対象で action_failed になっていた。拒否コードの追加はゼロ。詳細は英語版が権威。
 

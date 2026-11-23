@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.6.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+> Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).
 
 > 0.6.0은 `type`을 "보냈다"에서 "필드에 실제로 이 값이 들어갔다"로 끌어올린다. 네 번째 `effect=readback-verified`를 추가했다 — 쓸 뒤 다시 읽은 값이 컨트롤 스스로 보고한 데이터(원래 값, WM_GETTEXTLENGTH, EM_GETSEL 착점)로 만든 예측과 완전히 맞을 때만 인정된다. 가려진 필드는 `readback=unavailable`, 앱이 입력을 다시整形한 경우는 `readbackMismatch=true`이며 둘 다 승격하지 않으되 ok:true는 유지된다. `caretPosition: idle|start|end`(실측 결과 WinForms EDIT에서 `EM_SETSEL(-1,-1)`는 동작하지 않으므로 end는 (len,len)를 쓰고, asked=와 applied=를 나눠 보고한다). 전송 직전 초점 재측정 `focusMoved`, 비활성화 대상은 `disabled=true`와 effect를 unverified로 고정. 스크린샷은 BitBlt를 먼저 쓰고 `captureBackend=bitblt|gdiplus`를 보고한다(정지 장면에서 두 경로가 채널 차 0·PNG 바이트 동일을 실측, 병목은 인코딩이지 캡처가 아니다). 20번째 게이트 check-shot-backend(7개 변이 모두 빨강)와 test/readback-truth.mjs(36 검증, 앱 자체 보고 값과 대조)를 추가했다. 오래된 결함도 고쳤다: `SendMessageStrW`는 user32.dll 내보내기 기호가 아니라 `replace:true`가 모든 대상에서 action_failed였다. 거절 코드 추가는 없다. 상세는 영어본이 권위이다.
 

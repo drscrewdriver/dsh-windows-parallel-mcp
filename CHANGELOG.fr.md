@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.6.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+> Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).
 
 > 0.6.0 fait passer `type` de « envoyé » à « le champ contient bien cette valeur » : quatrième `effect=readback-verified`, accordé seulement quand la valeur relue après coup correspond à la prédiction bâtie sur les mesures que LE CONTRÔLE a rapportées (valeur précédente, WM_GETTEXTLENGTH, position EM_GETSEL) ; un champ masqué dit `readback=unavailable`, une application qui reformate dit `readbackMismatch=true`, sans promotion dans les deux cas et sans échec. `caretPosition: idle|start|end` — mesuré, `EM_SETSEL(-1,-1)` ne fait rien sur un EDIT WinForms, donc `end` utilise (len,len) et le résultat distingue `asked=` de `applied=`. Reprobe du focus à l’instant de l’envoi (`focusMoved`), cible désactivée signalée (`disabled=true`, `effect` figé à `unverified`). La capture passe en priorité par BitBlt et déclare `captureBackend=bitblt|gdiplus` (scène fixe : différence de canal 0, PNG identiques au bit près ; le goulot est l’encodage, pas la capture). Nouveau gate 20 `check-shot-backend` (sept mutations vues rouges) et `test/readback-truth.mjs` (36 assertions, jugées contre le valeur que l’application écrit elle-même). Un défaut de longue date est corrigé : `SendMessageStrW` n’est pas exporté par user32.dll, donc `replace:true` échouait sur chaque cible. Aucun nouveau code de refus. Voir l’entrée anglaise, autoritaire.
 

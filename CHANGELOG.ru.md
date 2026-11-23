@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.6.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+> Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).
 
 > 0.6.0 поднимает `type` с «я отправил» на «в поле действительно это значение»: четвёртый `effect=readback-verified` — только когда прочитанное обратно значение совпадает с предсказанием, построенным на измерениях, которые СООБЩИЛ САМ КОНТРОЛЬ (прежнее значение, WM_GETTEXTLENGTH, точка вставки EM_GETSEL); masked-поле отвечает `readback=unavailable`, приложение переформатировало ввод — `readbackMismatch=true`; ни то ни другое не повышает статус и не является ошибкой. `caretPosition: idle|start|end` — измерено: `EM_SETSEL(-1,-1)` на WinForms EDIT не работает, поэтому `end` использует (len,len), а результат раздельно сообщает `asked=` и `applied=`. Фокус переизмеряется в момент отправки (`focusMoved`); отключённое окно даёт `disabled=true`, а `effect` принудительно `unverified`. Снимок теперь предпочитает BitBlt и сообщает `captureBackend=bitblt|gdiplus` (на неподвижной сцене: 0 расхождений по каналам, PNG совпадают побайтово; узкое место — кодирование, а не захват). Новый гейт 20 `check-shot-backend` (семь мутаций, каждая красная) и `test/readback-truth.mjs` (36 проверок, сверяемых с самоотчётом приложения). Исправлен давний дефект: `SendMessageStrW` отсутствует в user32.dll, поэтому `replace:true` падал на каждой мишени. Новые коды отказа не добавлены. Авторитетна английская запись.
 

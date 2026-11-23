@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.6.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.6.0, read from the packument, not from a commit date).
+> Published 2026-11-23T17:25:44.824Z (registry `time` for 0.6.0, read from the packument, not from a commit date).
 
 > 0.6.0 eleva `type` de «lo envié» a «el campo contiene este valor»: cuarto `effect=readback-verified`, concedido solo cuando el valor releído coincide con la predicción construida sobre las medidas QUE EL CONTROL reportó (valor previo, WM_GETTEXTLENGTH, punto de EM_GETSEL); un campo enmascarado dice `readback=unavailable` y una app que reformatea dice `readbackMismatch=true`, ninguno se promueve y ninguno es un fallo. `caretPosition: idle|start|end` — medido: `EM_SETSEL(-1,-1)` no hace nada en EDIT de WinForms, así que `end` usa (len,len) y el resultado separa `asked=` de `applied=`. Foco re-medido en el instante del envío (`focusMoved`); objetivo deshabilitado reporta `disabled=true` con `effect` fijado a `unverified`. La captura prefiere BitBlt y declara `captureBackend=bitblt|gdiplus` (escena fija: 0 diferencia por canal, PNG idénticos byte a byte; el cuello es la codificación, no la captura). Nuevo gate 20 `check-shot-backend` (siete mutaciones, todas en rojo) y `test/readback-truth.mjs` (36 afirmaciones, juzgadas contra el auto-reporte de la app). Corregido un defecto antiguo: `SendMessageStrW` no está exportado por user32.dll, así que `replace:true` fallaba en cada objetivo. Sin nuevos códigos de rechazo. La entrada inglesa es la autoritativa.
 
