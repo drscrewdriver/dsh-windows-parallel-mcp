@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.4.1 — 2026-11-23
+
+> 0.4.1 ne touche qu'à la documentation et aux garde-fous : aucun changement d'exécution (`lib/`, `src/engine/` inchangés à l'octet). Corrige l'en-tête du README qui annonçait encore 0.2.0 et ajoute la section `types/index.d.ts` qui manquait totalement. Trois garde-fous ajoutés : la ligne de version comparée à `package.json`, l'identité octet pour octet du corps anglais des neuf traductions, et un test consommateur qui résout par nom de paquet (l'ancien n'utilisait qu'un chemin relatif, si bien que supprimer la condition `types` laissait tout au vert). Voir l'entrée anglaise.
+
 ## 0.4.0 — 2026-11-23
 
 > Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).

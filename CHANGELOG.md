@@ -5,6 +5,42 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.4.1 — 2026-11-23
+
+**A documentation release that exists because the front page was wrong.** No runtime change: `lib/`
+and `src/engine/` are untouched, byte for byte, and the tarball's JavaScript is identical to 0.4.0's.
+
+### Fixed
+- The README opened with a "what's new in 0.2.0" block. A 0.4.0 package whose first line announced
+  0.2.0 is not a cosmetic problem -- it is the front page of the contract stating the wrong contract,
+  and it had already survived one release unnoticed because nothing was checking it.
+- The README never mentioned the typed surface at all, while `types/index.d.ts` was the headline of
+  0.3.0 and got stronger in 0.4.0. New `## Typed surface` section, after Install.
+
+### Added
+- The release line at the top of every README names the version that actually ships, and a gate now
+  compares it to `package.json`. Staleness is a red gate instead of something a reader has to notice.
+- A gate that the nine translated READMEs carry a byte-identical English body under their
+  "English canonical text follows" note. That identity is what makes the note true, and it was
+  silently breakable: a one-file edit to `README.md` left nine files claiming to reproduce a body
+  they no longer matched.
+- `check-types.mjs` gained a phase that resolves the package **by name** out of a throwaway
+  `node_modules` in the OS temp dir, and requires the compiler to reject a deliberately wrong action
+  *by name*. The previous gate imported `../types/index.js` by relative path and never asked
+  `package.json` anything -- so deleting the `types` condition from `exports["."]` would have left
+  every gate green while every `nodenext` consumer broke with `TS7016`.
+- A preflight assertion that both `types` and `exports["."].types` resolve to the shipped file and
+  that `files` includes `types/`. Measured: the two fields serve different resolvers and neither is
+  removable on the assumption that the other covers it.
+
+### Notes
+- Every new check was proven non-vacuous by injecting the fault it exists to catch: a stale release
+  line produced ten failures, one drifted line in a translation was reported with its exact line
+  number and both versions, a removed `types` condition turned the preflight red, and widening
+  `WpmAction` to `| string` silenced the instrument and turned the by-name phase red.
+- `CHANGELOG.md` inside the 0.4.0 tarball cannot be changed retroactively; this is why the fixed
+  README reaches npm only from this version onward.
+
 ## 0.4.0 — 2026-11-23
 
 > Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).

@@ -1,7 +1,7 @@
 # dsh-windows-parallel-mcp
 
 **English** · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Português](README.pt.md) · [Русский](README.ru.md)
-> **Current release: 0.4.0** — this document describes the contract as of that version. What
+> **Current release: 0.4.1** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly

@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.4.1 — 2026-11-23
+
+> 0.4.1 — выпуск только документации и проверок, без изменений в рантайме (`lib/`, `src/engine/` побайтно не изменены). Исправлен заголовок README, который продолжал объявлять 0.2.0, и добавлен полностью отсутствовавший раздел о `types/index.d.ts`. Три новые проверки: строка версии сверяется с `package.json`, побайтное совпадение английского текста в девяти переводах, и потребительский тест, разрешающий пакет по имени (прежний использовал только относительный путь, поэтому удаление условия `types` оставляло всё зелёным). Подробнее — в английской записи.
+
 ## 0.4.0 — 2026-11-23
 
 > Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).

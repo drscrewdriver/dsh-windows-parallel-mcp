@@ -8,6 +8,10 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.4.1 — 2026-11-23
+
+> 0.4.1은 문서와 게이트만의 릴리스이며 런타임 변경은 없습니다(`lib/`, `src/engine/` 바이트 단위 그대로). README 첫머리가 계속 0.2.0을 선언하던 문제를 고치고, 언급조차 없던 `types/index.d.ts` 절을 추가했습니다. 게이트 세 개 추가: 릴리스 줄과 `package.json` 버전 대조, 9개 언어 영문 본문 바이트 일치, 패키지 이름으로 해석하는 소비자 테스트(기존에는 상대 경로만 써서 `types` 조건을 지워도 전부 초록이었습니다). 자세한 내용은 영문 항목 참조.
+
 ## 0.4.0 — 2026-11-23
 
 > Published 2026-11-23T10:47:57.110Z (registry `time` for 0.4.0, read from the packument, not from a commit date).

@@ -5,7 +5,7 @@
 > Um plugin DSH que permite a um agente controlar **as suas próprias** janelas Windows — silencioso por padrão, visível sob demanda. Quando uma janela aceita mensagens do Windows, o foco nunca é roubado. Quando apenas a Automação de UI a alcança, o foco sofre um único lampejo limitado, revertido automaticamente. Quando você solicita explicitamente o modo takeover, o cursor move-se para o ponto de ação e é sempre restaurado, com um HUD que oferece três formas de interrupção. Em todos os outros casos, recusa com um código e um motivo.
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.4.0** — this document describes the contract as of that version. What
+> **Current release: 0.4.1** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
