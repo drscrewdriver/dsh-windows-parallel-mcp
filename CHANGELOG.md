@@ -6,9 +6,8 @@ one is a promise to anyone installing it.
 
 ## 0.2.0 — 2026-11-23
 
-> Date note: this entry is written before publishing, so the date is the working date. The file's own
-> rule is that a released version carries the registry `time` value — replace this line at publish time
-> (task_36/task_37 in the plan) rather than leaving a commit date here.
+> Published 2026-11-23T06:26:52Z (registry `time` for 0.2.0, read from the packument, not from a commit
+> date).
 
 **The promise changes shape, so the version changes major-minor.** 0.1.x said: no physical input at
 all, ever. That was true and cheap to enforce by absence. 0.2.0 keeps it as the DEFAULT and adds an
