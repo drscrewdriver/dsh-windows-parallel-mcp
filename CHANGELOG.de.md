@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.1 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+
+> 0.8.1 repariert genau eine ausgelieferte Datei, die ein Registry abgewiesen hätte: 0.8.0s server.json hatte eine 800 Zeichen lange `description`, und das JSON-Schema des Registry (2025-12-11) begrenzt dieses Feld auf 100 -- ajv sagte das in einer Zeile. Am Verhalten des Plugins war nichts falsch -- MCP-Server, Aktionen, Tore und Audit sind bytegleich mit 0.8.0 -- aber das Manifest ist der Weg, wie ein Verzeichnis das Paket findet, und ein abgewiesenes Manifest ist eine Lieferform, die nur im Repository existiert. Die Korrektur: `description` ist jetzt ein Satz mit 92 Zeichen, und die Fähigkeitsprosa wandert nach `_meta` unter `publisher-provided` (das Feld, das das Registry tatsächlich erhält, Grenze 4 KB; hier rund 1,2 KB). schema-test prüft künftig die Registry-Grenzen selbst (description 1..100, title 1..100, name reverse-DNS innerhalb von 200 Zeichen, eine konkrete Version statt eines Bereichs, `_meta` unter 4096 Bytes, und jede deklarierte Umgebungsvariable mit einem Namen); die bidirektionale Prüfung «deklariert == gelesen» bleibt. package.json / dsh.plugin.json / server.json / README-Versionszeile stehen jetzt auf 0.8.1, und die Beschreibung von dsh.plugin.json nennt endlich die zweite Lieferform, die seit 0.8.0 fehlte -- ein Manifest, das eine ältere Version beschreibt, ist genau so etwas wie ein Urteil über etwas, das das Plugin nicht mehr tut. Gefunden wurde das, wie die meisten Defekte hier, indem die Prüfung gegen das echte Ding laufen gelassen wurde: Das Registry-Schema wurde für den 0.8.0-Release erneut geholt (Plan R7: Preview, Regeln können sich ändern) und mit dem im DSH-Baum vorhandenen ajv validiert -- «server.json validiert» ist damit ein Befehl mit Exit-Code, keine Meinung.
+
 ## 0.8.0 — 2026-11-24
 
 > Published 2026-11-24T01:21:32.334Z (registry `time` for 0.8.0, read from the packument, not from a commit date).

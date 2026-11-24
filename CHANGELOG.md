@@ -5,6 +5,35 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.1 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+
+**One shipped file that a registry would have refused.** 0.8.0's `server.json` carried an 800-character
+`description`; the Registry's own JSON Schema (2025-12-11) caps that field at 100 characters, and ajv said
+so in one line. Nothing about the plugin's behaviour was wrong -- the MCP server, the actions, the gates
+and the audit are byte-identical to 0.8.0 -- but the manifest is how a listing finds the package, and a
+manifest a registry rejects is a delivery form that exists only in the repository.
+
+### Fixed
+
+- `server.json` `description` is now a 92-character sentence, and the capability prose moved to
+  `_meta["io.modelcontextprotocol.registry/publisher-provided"].capabilitySummary`, which is the field the
+  Registry actually preserves for it (under its 4 KB limit; this one is ~1.2 KB).
+- `test/schema-test.mjs` asserts the Registry's limits rather than remembering them: `description` 1..100,
+  `title` 1..100, `name` matching the reverse-DNS pattern within 200 characters, a concrete version rather
+  than a range, `_meta` publisher-provided under 4096 bytes, and every declared environment variable
+  carrying a name. The pre-existing two-way check (declared == read) stays.
+- `package.json` / `dsh.plugin.json` / `server.json` / README release line all now say 0.8.1, and
+  `dsh.plugin.json`'s description mentions the second delivery form, which it had been omitting since
+  0.8.0 -- a manifest that describes an older release is how a plugin gets judged for something it no
+  longer does.
+
+Found the way most of this project's defects are found: by running the check against the real thing. The
+Registry schema was fetched for the 0.8.0 release (the plan's R7 says the registry is in preview and its
+rules may move before general availability) and validated with the ajv already present in the DSH install
+tree, so the claim "`server.json` validates" is a command with an exit code, not an opinion.
+
 ## 0.8.0 — 2026-11-24
 
 > Published 2026-11-24T01:21:32.334Z (registry `time` for 0.8.0, read from the packument, not from a commit date).

@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.1 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+
+> 0.8.1 corrige exactamente un archivo enviado que un registro habría rechazado: la `description` de server.json en 0.8.0 medía 800 caracteres y el JSON Schema del Registry (2025-12-11) limita ese campo a 100; ajv lo dijo en una línea. No había nada incorrecto en el comportamiento del plugin -- el servidor MCP, las acciones, las puertas y la auditoría son idénticos byte a byte a 0.8.0 -- pero el manifiesto es cómo un listado encuentra el paquete, y un manifiesto rechazado es una forma de entrega que solo existe en el repositorio. La corrección: `description` pasa a ser una frase de 92 caracteres y la prosa de capacidades se muda a `_meta` bajo `publisher-provided` (la clave que el Registry sí conserva, techo 4 KB; aquí unos 1,2 KB). schema-test verifica ahora los límites del propio registry (description 1..100, title 1..100, name reverse-DNS dentro de 200 caracteres, una versión concreta en lugar de un rango, `_meta` por debajo de 4096 bytes, y un name para cada variable de entorno declarada); sigue el control bidireccional «declarado == leído». package.json / dsh.plugin.json / server.json / la línea de versión del README quedan en 0.8.1, y la descripción de dsh.plugin.json por fin nombra la segunda forma de entrega, omitida desde 0.8.0. Encontrado como la mayoría de los defectos aquí: ejecutando la comprobación contra la cosa real. El schema del Registry se volvió a descargar para el lanzamiento de 0.8.0 (el plan R7 avisa de que el registro está en preview y sus reglas pueden moverse) y la validación corre con el ajv ya presente en el árbol de DSH, así que «server.json valida» es un comando con código de salida, no una opinión.
+
 ## 0.8.0 — 2026-11-24
 
 > Published 2026-11-24T01:21:32.334Z (registry `time` for 0.8.0, read from the packument, not from a commit date).

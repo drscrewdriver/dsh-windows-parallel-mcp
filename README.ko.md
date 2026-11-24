@@ -5,7 +5,7 @@
 > 에이전트가 **자신의** Windows 창을 조작하도록 하는 DSH 플러그인입니다. 기본은 조용히, 요청 시에는 눈에 보이게 동작합니다. 창이 창 메시지를 받으면 포커스를 전혀 빼앗지 않고, UI Automation으로만 도달 가능하면 포커스가 한 번의 제한된 플래시로 이동한 뒤 자동 복구됩니다. 테이크오버를 명시적으로 요청하면 커서가 동작 지점으로 이동해 항상 복원되며 HUD가 세 가지 중단 수단을 제공합니다. 그 밖의 경우에는 코드와 이유를 붙여 거부합니다.
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.8.0** — this document describes the contract as of that version. What
+> **Current release: 0.8.1** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
@@ -470,6 +470,13 @@ manifest for it, with the namespace `io.github.drscrewdriver/dsh-windows-paralle
 package as its ownership proof. A DSH profile can bridge it instead of loading the plugin directly
 (`@deepseek-ai/dsh-mcp-client`, stdio transport), which registers the tool as `mcp__<serverName>__wpm`;
 `test/mcp-bridge.mjs` drives that bridge with the host's own client SDK and tool-definition code.
+
+**The manifest is validated, not guessed.** `server.json` is checked against the Registry's own JSON
+Schema (2025-12-11) and `test/schema-test.mjs` keeps the limits in the gate: `description` at most 100
+characters, `title` at most 100, a reverse-DNS `name`, one concrete version rather than a range,
+`_meta` under 4 KB, and every environment variable declared that the server actually reads. The reason
+those lines exist is that 0.8.0 shipped an 800-character `description` and the validator refused it: a
+manifest a registry rejects is a form nobody can install from a listing, and 0.8.1 is that correction.
 
 ## Typed surface
 

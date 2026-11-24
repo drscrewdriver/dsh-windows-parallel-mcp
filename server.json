@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.drscrewdriver/dsh-windows-parallel-mcp",
   "title": "Windows Parallel",
-  "description": "Drive one Windows window through eleven declared actions, choosing the cheapest door that can reach the target: window messages for a classic control (zero foreground changes), one bounded self-reversing UI Automation flash when only a pattern can reach it, and an opt-in takeover tier where the real cursor moves and is always restored. Writes are read back and the effect value names who reported success; screenshots name the capture path that painted them. Refusals carry a code that names the switch or the missing fact, the policy ceiling is set by the process owner and never by a call, and every action appends one audit row that records decisions and lengths but never the content typed or copied. Windows only, PowerShell 5.1 sidecar, zero install dependencies, no mouse-event injection.",
-  "version": "0.8.0",
+  "description": "Drive a Windows window over MCP stdio: quiet by default, one policy ceiling, coded refusals.",
+  "version": "0.8.1",
   "repository": {
     "url": "https://github.com/drscrewdriver/dsh-windows-parallel-mcp",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "dsh-windows-parallel-mcp",
-      "version": "0.8.0",
+      "version": "0.8.1",
       "transport": {
         "type": "stdio"
       },
@@ -103,7 +103,8 @@
       "platform": "windows",
       "requires": "Windows PowerShell 5.1 (ships with Windows) and Node >= 20. No install dependencies; no build step.",
       "sameEngineTwoForms": "lib/index.js is the DSH plugin half and lib/mcp-server.mjs is this stdio half; both drive one PowerShell engine, so the actions, the refusal vocabulary, the gates and the audit log are identical in either form.",
-      "schemaSource": "tools/list is generated from src/schema/tools.json at start-up -- the action surface is declared once."
+      "schemaSource": "tools/list is generated from src/schema/tools.json at start-up -- the action surface is declared once.",
+      "capabilitySummary": "Eleven declared actions over one engine: window messages for a classic control (zero foreground changes), one bounded self-reversing UI Automation flash when only a pattern can reach it, and an opt-in takeover tier where the real cursor moves and is always restored. Writes are read back and the effect value names who reported success; screenshots name the capture path that painted them. Every refusal names the switch or the missing fact, and every action appends one audit row recording decisions and lengths but never the content typed or copied. Windows only, PowerShell 5.1 sidecar, zero install dependencies, no mouse-event injection."
     }
   }
 }

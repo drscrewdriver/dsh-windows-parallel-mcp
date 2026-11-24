@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.1 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+
+> 0.8.1 corrige exatamente um arquivo enviado que um registry recusaria: a `description` do server.json na 0.8.0 tinha 800 caracteres e o JSON Schema do Registry (2025-12-11) limita esse campo a 100; o ajv disse isso em uma linha. Não havia nada errado no comportamento do plugin -- o servidor MCP, as ações, os portões e a auditoria são idênticos byte a byte aos da 0.8.0 -- mas o manifesto é como uma listagem encontra o pacote, e um manifesto recusado é uma forma de entrega que só existe no repositório. A correção: `description` vira uma frase de 92 caracteres, e a prosa de capacidades muda para `_meta` sob `publisher-provided` (a chave que o Registry de fato preserva, teto de 4 KB; aqui cerca de 1,2 KB). O schema-test agora verifica os próprios limites do registry (description 1..100, title 1..100, name reverse-DNS dentro de 200 caracteres, uma versão concreta em vez de intervalo, `_meta` abaixo de 4096 bytes, e um name para cada variável de ambiente declarada); a checagem bidirecional «declarado == lido» continua. package.json / dsh.plugin.json / server.json / a linha de versão do README passam a 0.8.1, e a descrição do dsh.plugin.json finalmente nomeia a segunda forma de entrega, omitida desde a 0.8.0. Descoberto como a maioria dos defeitos aqui: rodando a verificação contra a coisa real. O schema do Registry foi baixado de novo para o lançamento da 0.8.0 (o plano R7 avisa que o registry está em preview e as regras podem mudar) e a validação roda com o ajv já presente na árvore do DSH, então «server.json valida» é um comando com código de saída, não uma opinião.
+
 ## 0.8.0 — 2026-11-24
 
 > Published 2026-11-24T01:21:32.334Z (registry `time` for 0.8.0, read from the packument, not from a commit date).

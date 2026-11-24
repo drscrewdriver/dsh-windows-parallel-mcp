@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.1 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+
+> 0.8.1 はレジストリに拒否されうる出荷ファイル 1 個だけの修正。0.8.0 の server.json の description は 800 文字で、Registry の JSON Schema（2025-12-11）はこの欄を 100 文字に制限しており、ajv が 1 行でそれを言った。プラグインの挙動は問題なし——MCP サーバーもアクションもゲートも監査も 0.8.0 とバイト単位で同一——だがマニフェストは一覧がパッケージを見つける手段であり、拒否されるマニフェストはリポジトリの中にしか存在しない出荷形態になる。直し方：description を 92 文字の文に縮め、能力説明は Registry が実際に保持する欄（上限 4KB、今回は約 1.2KB）である _meta の publisher-provided へ移した。schema-test は以後、レジストリの制限そのものを検証する（description 1..100、title 1..100、name は reverse-DNS 書式で 200 字以内、版は範囲でなく具体値、_meta は 4096 バイト未満、宣言された環境変数すべてに name があること）。既存の「宣言==読み取り」双方向照合はそのまま。package.json / dsh.plugin.json / server.json / README の版表示を 0.8.1 に統一し、dsh.plugin.json の説明から 0.8.0 時点で抜け落ちていた第二の出荷形態を補った。見つかり方は本プロジェクトの多くの欠陥と同じく、実物を相手に検査を走らせたから。Registry スキーマは 0.8.0 のリリースために取り直したもの（計画 R7 は preview 中のため規則が動きうると言う）。検証は DSH インストールツリーにある ajv を使ったので、「server.json は通る」は意見ではなく終了コードを持つ一発のコマンドである。
+
 ## 0.8.0 — 2026-11-24
 
 > Published 2026-11-24T01:21:32.334Z (registry `time` for 0.8.0, read from the packument, not from a commit date).

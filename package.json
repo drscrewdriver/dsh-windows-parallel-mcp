@@ -1,12 +1,12 @@
 {
   "name": "dsh-windows-parallel-mcp",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publishConfig": {
     "access": "public",
     "tag": "latest",
     "registry": "https://registry.npmjs.org/"
   },
-  "description": "Drive a Windows window quietly by default and visibly on request: one tool, eleven actions (windows, status, click, type, focus, snapshot, screenshot, preview, launch, clipboard, window), a channel decision table that prefers the quiet door, a bounded self-reversing focus flash when only UI Automation can reach the control, an opt-in takeover tier (policy full AND takeoverAllowed) where the real cursor moves to the action point and is always restored, a read surface that hands the model a numbered element frame plus screenshot coordinates as data so it never multiplies a scale factor, and since 0.6.0 a read-back of every write: effect=readback-verified only when the field's own value matches a prediction built from the control's measurements, with caretPosition, disabled/focus reporting and the capture path named as captureBackend. 0.7.0 adds the three desktop capabilities behind one ceiling (policy), an exact launch whitelist, an idle check that refuses instead of interrupting the owner, and an append-only JSONL audit log that records decisions and lengths but never payloads. Windows PowerShell 5.1 sidecar, zero install dependencies, no mouse injection.",
+  "description": "Drive a Windows window quietly by default and visibly on request: one tool, eleven actions (windows, status, click, type, focus, snapshot, screenshot, preview, launch, clipboard, window), a channel decision table that prefers the quiet door, a bounded self-reversing focus flash when only UI Automation can reach the control, an opt-in takeover tier (policy full AND takeoverAllowed) where the real cursor moves to the action point and is always restored, a read surface that hands the model a numbered element frame plus screenshot coordinates as data so it never multiplies a scale factor, and since 0.6.0 a read-back of every write: effect=readback-verified only when the field's own value matches a prediction built from the control's measurements, with caretPosition, disabled/focus reporting and the capture path named as captureBackend. 0.7.0 adds the three desktop capabilities behind one ceiling (policy), an exact launch whitelist, an idle check that refuses instead of interrupting the owner, and an append-only JSONL audit log that records decisions and lengths but never payloads. Since 0.8.0 the same engine also answers as an MCP server over stdio (bin: wpm-mcp, zero dependencies), whose tools/list is generated from the same contract file and whose settings come from the environment rather than from the call. Windows PowerShell 5.1 sidecar, zero install dependencies, no mouse injection.",
   "keywords": [
     "deepseek",
     "deepseek-harness",
@@ -16,6 +16,9 @@
     "parallel",
     "hwnd",
     "ui-automation",
+    "mcp",
+    "mcp-server",
+    "stdio",
     "computer-use"
   ],
   "license": "MIT",

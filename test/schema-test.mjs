@@ -175,6 +175,22 @@ for (const tool of schema.tools) {
     if (p0.identifier !== pkgJson.name) fail(`server.json packages[0].identifier '${p0.identifier}' != package name '${pkgJson.name}'`);
     if (p0.transport?.type !== 'stdio') fail(`server.json transport is ${JSON.stringify(p0.transport)}; this form is stdio, and no HTTP/SSE surface exists or is planned`);
     if (!Array.isArray(sj.packages) || sj.packages.length !== 1) fail(`server.json must describe exactly the one npm package this repo is, got ${sj.packages?.length}`);
+    // The Registry's own limits, transcribed from the schema this file's $schema points at
+    // (2025-12-11: description<=100, title<=100, name pattern, no version ranges, _meta<=4KB).
+    // 0.8.0 shipped an 800-character description and the validator said NO -- which is the whole reason
+    // these lines exist: a manifest that a registry refuses is a form nobody can install from a listing.
+    if (String(sj.description ?? '').length === 0 || sj.description.length > 100)
+      fail(`server.json description must be 1..100 characters (the Registry schema caps it); got ${sj.description?.length}`);
+    if (sj.title !== undefined && (sj.title.length === 0 || sj.title.length > 100))
+      fail(`server.json title must be 1..100 characters; got ${sj.title?.length}`);
+    if (!/^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/.test(String(sj.name ?? '')) || sj.name.length > 200)
+      fail(`server.json name '${sj.name}' is not a reverse-DNS namespace/name of <=200 characters`);
+    if (/[*\^~]|[><=]/.test(String(sj.version ?? '')))
+      fail(`server.json version '${sj.version}' looks like a range; the Registry wants one concrete version`);
+    const metaBytes = Buffer.byteLength(JSON.stringify(sj._meta?.['io.modelcontextprotocol.registry/publisher-provided'] ?? {}), 'utf8');
+    if (metaBytes > 4096) fail(`_meta publisher-provided is ${metaBytes} bytes; the official registry preserves at most 4096`);
+    const noName = (p0.environmentVariables ?? []).filter((e) => !e.name);
+    if (noName.length) fail(`${noName.length} environment variable(s) in server.json have no name`);
     // Every environment variable server.json advertises has to be one the server actually reads, and
     // every one the server reads has to be advertised: a hidden switch is an unenforceable one.
     const serverSrc = readFileSync('lib/mcp-server.mjs', 'utf8');

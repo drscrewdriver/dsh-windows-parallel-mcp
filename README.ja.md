@@ -5,7 +5,7 @@
 > エージェントが**自分の** Windows ウィンドウを操作するための DSH プラグインです。既定では静默、要求があれば可視化します。ウィンドウがウィンドウメッセージを受け付ける場合、フォーカスは一切奪われません。UI Automation 経由でしか届かない場合、フォーカスは一度だけ有界なフラッシュで移り自動で戻ります。明示的にテイクオーバーを要求した場合、カーソルは操作点へ移動し常に復元され、HUD が三つの中断手段を提供します。それ以外はコードと理由を添えて拒否します。
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.8.0** — this document describes the contract as of that version. What
+> **Current release: 0.8.1** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
@@ -470,6 +470,13 @@ manifest for it, with the namespace `io.github.drscrewdriver/dsh-windows-paralle
 package as its ownership proof. A DSH profile can bridge it instead of loading the plugin directly
 (`@deepseek-ai/dsh-mcp-client`, stdio transport), which registers the tool as `mcp__<serverName>__wpm`;
 `test/mcp-bridge.mjs` drives that bridge with the host's own client SDK and tool-definition code.
+
+**The manifest is validated, not guessed.** `server.json` is checked against the Registry's own JSON
+Schema (2025-12-11) and `test/schema-test.mjs` keeps the limits in the gate: `description` at most 100
+characters, `title` at most 100, a reverse-DNS `name`, one concrete version rather than a range,
+`_meta` under 4 KB, and every environment variable declared that the server actually reads. The reason
+those lines exist is that 0.8.0 shipped an 800-character `description` and the validator refused it: a
+manifest a registry rejects is a form nobody can install from a listing, and 0.8.1 is that correction.
 
 ## Typed surface
 

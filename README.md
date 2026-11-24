@@ -1,7 +1,7 @@
 # dsh-windows-parallel-mcp
 
 **English** · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Português](README.pt.md) · [Русский](README.ru.md)
-> **Current release: 0.8.0** — this document describes the contract as of that version. What
+> **Current release: 0.8.1** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
@@ -466,6 +466,13 @@ manifest for it, with the namespace `io.github.drscrewdriver/dsh-windows-paralle
 package as its ownership proof. A DSH profile can bridge it instead of loading the plugin directly
 (`@deepseek-ai/dsh-mcp-client`, stdio transport), which registers the tool as `mcp__<serverName>__wpm`;
 `test/mcp-bridge.mjs` drives that bridge with the host's own client SDK and tool-definition code.
+
+**The manifest is validated, not guessed.** `server.json` is checked against the Registry's own JSON
+Schema (2025-12-11) and `test/schema-test.mjs` keeps the limits in the gate: `description` at most 100
+characters, `title` at most 100, a reverse-DNS `name`, one concrete version rather than a range,
+`_meta` under 4 KB, and every environment variable declared that the server actually reads. The reason
+those lines exist is that 0.8.0 shipped an 800-character `description` and the validator refused it: a
+manifest a registry rejects is a form nobody can install from a listing, and 0.8.1 is that correction.
 
 ## Typed surface
 
