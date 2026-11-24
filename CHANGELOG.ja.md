@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.7.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.7.0, read from the packument, not from a commit date).
+> Published 2026-11-23T18:54:04.951Z (registry `time` for 0.7.0, read from the packument, not from a commit date).
 
 > 0.7.0 は「プログラムを起動すらできない」穴を塞ぎ、3 つのデスクトップ能力を追加すると同時に、二値の権限ゲートを 1 つの天井へ置き換えた。各アクションは必要最低の段（requiresTier：readonly < quiet < flash < takeover）を宣言し、所有者は policy を 1 つだけ設定する（既定は balanced）。天井超は policy_denied で、次は再試行ではなく設定の引き上げ。launch は互いに暗示しない 2 つのスイッチ（appLaunchAllowed と、完全一致・大文字小文字無視の appLaunchAllow。空 = 何も起動できない、ワイルドカードも前方一致もなし）を要求し、拒否時は worker 要求ゼロ。プロセスは動いているが窓が無い場合は ok:true + hwnd 空 + detail=window-not-yet（実測：コールド notepad は 1348ms まで MainWindowHandle=0）。clipboard の読み取りは長さだけを返し内容は一切返さない（64KB 上限、truncated を明記）。image 書き込みは shotId を直接受け取る。window の 5 操作はすべて窓自身の状態（IsIconic／rect／WS_EX_TOPMOST）の読み戻しで検証し、restore は定義上フォアグラウンドを奪うため、隠さず foregroundTaken として報告する。アクション数 8→11（契約の 4 か所を同期し、check-types のログ行は tools.json から読む）。所有者在席中はダイアログを出さず user_active で拒否する。脱出口 forceUserActive:true は監査に残る。新コード 15/16/17（app_launch_denied／policy_denied／user_active）はいずれも設定名を次の一手に持つ。監査ログはアクションごとに 1 行、allow も deny も記録し、内容は決して記録しない。PS 5.1（.NET Framework）に Clipboard.Flush() が存在しない不具合と、分岐が書かないキーを読んでいた不具合を実際に修正。新ゲート 21 check-policy-table は JS と PS の 2 本の階段が同じ列挙であることを検証し、check-jsdoc は lib/ の全ファイルが対象に含まれることを検証する（以前は黙って見逃されていた）。意図した厳格化：takeover:true は takeoverAllowed に加え policy=full が必要。全体ゲート 21 腕 ×3 GATE GREEN。権威あるのは英語版。
 

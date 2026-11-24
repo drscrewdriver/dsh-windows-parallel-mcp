@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.7.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.7.0, read from the packument, not from a commit date).
+> Published 2026-11-23T18:54:04.951Z (registry `time` for 0.7.0, read from the packument, not from a commit date).
 
 > 0.7.0 补上「连启动一个程序都做不到」的缺口并新增三项桌面能力，同时把二元权限闸换成一个天花板：每个动作声明自己最低需要哪一档（requiresTier：readonly < quiet < flash < takeover），所有者只设一个 policy（默认 balanced）；超出即 policy_denied，下一步写明是调高设置而不是重试。launch 需要两个互不暗示的开关——appLaunchAllowed 与精确、大小写折叠的 appLaunchAllow 白名单（默认为空＝什么都不能启动，无通配符、无前缀匹配），拒绝时零 worker 请求；进程已启但窗口未就绪回答 ok:true + hwnd 为空 + detail=window-not-yet（实测冷启 notepad 1348ms 内 MainWindowHandle=0）。clipboard 读只报长度、绝不报内容，上限 64KB 且明写 truncated，写图片可直接接收 shotId。window 五个 op 全部靠读回窗口自身状态（IsIconic／rect／WS_EX_TOPMOST）验证，restore 按定义会抢前台，因此结果带 foregroundTaken 实测值而不是隐藏它。动作数 8→11（四处契约面同步，且 check-types 日志行改为从 tools.json 读数）。空闲感知：主人在场时拒绝对话框、改答 user_active，逃生门 forceUserActive:true 会计入审计。新增第 15/16/17 码 app_launch_denied／policy_denied／user_active（每个都指向一个设置）。审计日志 %LOCALAPPDATA%\wpm\audit.log 逐动作一行，allow 与 deny 都记，绝不记内容（clipboard 只留 op/format/chars）。修掉 Clipboard.Flush() 在 PS 5.1（.NET Framework）根本不存在、以及拒绝处理里读到分支从未写入的键两个真缺陷。第 21 道门禁 check-policy-table 断言 JS 与 PS 两份阶梯是同一份；check-jsdoc 现在断言 lib/ 每个文件都被覆盖（此前新增模块会静默漏检）。有意收紧的一处：takeover:true 现在除 takeoverAllowed 外还需要 policy 为 full。全量门禁 21 臂 ×3 GATE GREEN。详情见英文权威条目。
 

@@ -7,7 +7,7 @@ one is a promise to anyone installing it.
 
 ## 0.7.0 — 2026-11-23
 
-> Published <REGISTRY-TIME> (registry `time` for 0.7.0, read from the packument, not from a commit date).
+> Published 2026-11-23T18:54:04.951Z (registry `time` for 0.7.0, read from the packument, not from a commit date).
 
 **The gap that was "you cannot even start a program" is closed, and the binary permission gate becomes
 one ceiling over eleven declared rungs.** Three new actions, one authorization model, an audit trail,
