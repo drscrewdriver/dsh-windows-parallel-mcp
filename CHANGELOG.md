@@ -5,9 +5,9 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.8.0 — 2026-11-23
+## 0.8.0 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.0, read from the packument, not from a commit date).
+> Published 2026-11-24T01:21:32.334Z (registry `time` for 0.8.0, read from the packument, not from a commit date).
 
 **One engine, two channels, and the second one is not a second implementation.** The package is now also
 an MCP server over stdio (`bin: wpm-mcp`), while the DSH plugin form is untouched: same `apply()`, same
