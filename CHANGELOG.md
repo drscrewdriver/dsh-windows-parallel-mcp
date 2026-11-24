@@ -7,7 +7,7 @@ one is a promise to anyone installing it.
 
 ## 0.8.2 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.2, read from the packument, not from a commit date).
+> Published 2026-11-24T04:59:02.972Z (registry `time` for 0.8.2, read from the packument, not from a commit date).
 
 **A refusal that said "no child window sits under that point" when the truth was "something is painted over
 it".** Both are refusals and neither verdict changed; what changed is that the second now says so, names the

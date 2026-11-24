@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.8.2 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.2, read from the packument, not from a commit date).
+> Published 2026-11-24T04:59:02.972Z (registry `time` for 0.8.2, read from the packument, not from a commit date).
 
 > 0.8.2 が変えたのは拒否の一文と、そのテスト側の根だけ。点が実際には対象の子ウィンドウ内にあり、別のウィンドウに覆われているだけなのに、エンジンは「その点の下に対象の子ウィンドウは無い」と答えていた——別々の事柄が同じ言葉を共有していた。拒否コードは 17 個のまま一つも増減せず、変わったのは二つ目が遮っているウィンドウのクラスを名指しし、唯一機能する次の一歩（対象を前面へ）を示すこと。推測ではない：所有者のブラウザを WinForms の標的に重ね（標的は visible=true、ボタン矩形がその点を含む）、そのボタンへ WM_LBUTTONDOWN/UP を送ると ok が返るのに、アプリはハンドラを実行しなかった（caption は Press のまま、focusTaken=false）。この toolkit のメッセージクリックはマウスキャプチャを必要とし、覆われたウィンドウはそれを得られない。したがって先に試した「メッセージは可視性を要さないから点を受け入れる」は撤回した——起きていないクリックに成功を報告することになるから。テスト側：llm-action-battery は desktop profile のインストール版（0.2.0、リポジトリは 0.8.1）を黙って読み込んでいた。計画の findings にある「ベースライン失敗」二件はそれが話していたもので、リポジトリに替えると両方消える。いまは被測物のバージョンが違えば実行を拒否する。foreground の腕は各アクションの前後で測る形に変更（従来は前後一回だけで「最後に誰が前面か」を測っていた）。fixture に既定オフの -Topmost を追加（Z 順のみ、前面は動かさない。前面ロックがバックグラウンドプロセスの SetForegroundWindow を実際に拒否したため）。バッテリは dispose と 240 秒の強制終了を備えた（無いと二回目の連続実行が漏れた worker で固まる）。lib/ と src/schema/ は無変更。
 

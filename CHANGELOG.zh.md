@@ -10,7 +10,7 @@ one is a promise to anyone installing it.
 
 ## 0.8.2 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.2, read from the packument, not from a commit date).
+> Published 2026-11-24T04:59:02.972Z (registry `time` for 0.8.2, read from the packument, not from a commit date).
 
 > 0.8.2 只改一句拒绝的话，以及它在测试侧的根。当点其实落在目标的子窗内、只是被别的窗口盖住时，引擎过去说「那个点下面没有目标的子窗」——两件事共用一个词。拒绝码一个没动（仍是十七个），变的是第二句现在会点名挡住它的是哪个窗口类，并给出唯一能走的下一步：把目标带到前面。这条不是推测：把 owner 的浏览器盖在 WinForms 靶窗上（靶窗 visible=true、按钮矩形确实含着该点），向那个按钮投递 WM_LBUTTONDOWN/UP 得到 ok，而应用从未执行 handler（caption 停在 Press、focusTaken=false）。消息点击在这个 toolkit 上依赖鼠标捕获，被盖住的窗口拿不到。所以先试过的「消息门不需要可见，就接受这个点」已回退——它等于为一个没发生的点击报成功。测试侧：llm-action-battery 过去静默加载 desktop profile 里的安装版（停在 0.2.0，而仓库是 0.8.1），计划 findings 里那两条「基线失败」正是它在说话，换成仓库后两条都消失；现在被测物版本不一致会直接拒绝运行。foreground 臂改成逐动作前后配对（原来只比首尾，测的是「末尾谁在前台」）。fixture 新增默认关的 -Topmost（只改 Z 序、不动前台，因为前台锁实测拒绝了后台进程的 SetForegroundWindow），电池补 dispose 与 240s 硬超时（否则连续第二次会挂在泄漏的 worker 上）。lib/ 与 src/schema/ 零改动。
 
