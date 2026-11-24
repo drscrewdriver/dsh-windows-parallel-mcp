@@ -27,6 +27,12 @@ param(
   # experiment reported a "background" reading for a window that was still foreground.
   # -1 disables.
   [int]$GrabFgAfterMs = -1,
+    # Keep the form above all non-topmost windows for the run. It changes Z-ORDER ONLY -- never the
+    # foreground -- and needs no foreground permission, which is what makes it the right tool for a
+    # test that must see its own pixels: measured 2026-11-24, a background process cannot raise itself
+    # (SetForegroundWindow is refused by the foreground lock), and a covered button accepts a message
+    # press and never runs its handler. Off by default so nothing else inherits a topmost window.
+    [switch]$Topmost = $false,
   # When this file appears, the form takes the foreground AGAIN and deletes the file. It
   # exists because an experiment can lose its foreground hand-off mid-run: the first
   # attributed Calculator run found the target had kept the foreground from round 1 onward,
@@ -76,7 +82,7 @@ $form.Text = $Title
 $form.Size = New-Object System.Drawing.Size(420, 300)
 $form.StartPosition = 'Manual'
 $form.Location = New-Object System.Drawing.Point($X, $Y)
-$form.Topmost = $false
+$form.Topmost = [bool]$Topmost
 $form.ShowInTaskbar = $true
 
 $edit = New-Object System.Windows.Forms.TextBox

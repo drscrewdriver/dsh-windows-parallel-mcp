@@ -89,21 +89,40 @@ function Get-WpmWindowList {
 }
 
 function Resolve-WpmChildAtPoint([IntPtr]$Hwnd, [int]$X, [int]$Y) {
-  # Which child HWND actually sits under a screen point. Uses ChildWindowFromPointEx (the same
-  # approach the competitor uses) instead of trusting a fixed child index: index order is not a
-  # contract, and clicking the wrong child is indistinguishable from clicking the right one until
-  # the app does something else.
+  # Which child HWND sits under a screen point, or Zero with the REASON recorded.
+  #
+  # The hit test refuses two different worlds with the same word, and the refusal text has to keep
+  # them apart because their next steps do not overlap: a point outside every child of the named
+  # window is a wrong coordinate; a point that IS inside one of our children but has a foreign window
+  # on top is COVERAGE.
+  #
+  # WHY COVERAGE STILL REFUSES, when SendMessageW needs no visibility. Measured 2026-11-24: with the
+  # owner's browser covering the target (target visible=true, rect 120,120,540,420; WindowFromPoint
+  # over its own button returned Chrome_WidgetWin_1), delivering WM_LBUTTONDOWN/UP to the button
+  # returned ok and the application NEVER RAN THE HANDLER -- focusTaken=false, button caption
+  # unchanged. A click the app silently ignores is worse than a refusal that says why: the first
+  # reports success for something that did not happen. So this refuses, names the blocker class, and
+  # points at the only next step that works (bring the target forward).
+  #
+  # Index order is still not a contract (the original note): when the point is ours, the child is
+  # chosen by which RECT holds it, never by its position in the enumeration.
   $p = New-Object 'WpmWin+POINT'
   $p.X = $X; $p.Y = $Y
   $hit = [WpmWin]::WindowFromPoint($p)
-  if ($hit -eq [IntPtr]::Zero) { return [IntPtr]::Zero }
-  $root = [WpmWin]::Root($hit)
-  if ($root -ne $Hwnd) {
-    # The point belongs to some other top-level window; acting there would be acting on a window
-    # the caller did not name.
-    return [IntPtr]::Zero
+  $script:WpmPointCovered = $false
+  $script:WpmPointBlocker = ''
+  if ($hit -ne [IntPtr]::Zero -and [WpmWin]::Root($hit) -eq $Hwnd) { return $hit }
+  foreach ($c in @([WpmWin]::Children($Hwnd))) {
+    $child = [IntPtr]$c
+    $r = New-Object 'WpmWin+RECT'
+    if (-not [WpmWin]::GetWindowRect($child, [ref]$r)) { continue }
+    if ($X -ge $r.Left -and $X -lt $r.Right -and $Y -ge $r.Top -and $Y -lt $r.Bottom) {
+      $script:WpmPointCovered = $true
+      if ($hit -ne [IntPtr]::Zero) { $script:WpmPointBlocker = [WpmWin]::Cls([WpmWin]::Root($hit)) }
+      return [IntPtr]::Zero
+    }
   }
-  return $hit
+  return [IntPtr]::Zero
 }
 
 function Get-WpmProofWindow {
@@ -692,7 +711,10 @@ function Invoke-WpmAction {
         }
         $child = Resolve-WpmChildAtPoint $h $X $Y
         if ($child -eq [IntPtr]::Zero) {
-          $result.refusal = 'unreachable'; $result.reason = 'no child window of the target sits under that point'
+          $result.refusal = 'unreachable'
+          $result.reason = $(if ($script:WpmPointCovered) {
+            "the point is inside a child of the target but another window is on top (blocker class=$($script:WpmPointBlocker)); a message press there is accepted and ignored -- the application never runs the handler. Next step: bring the target to the front, or choose a point that is visible"
+          } else { 'no child window of the target sits under that point' })
           $result.latencyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
           return $result
         }
