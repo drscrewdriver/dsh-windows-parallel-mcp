@@ -3,7 +3,7 @@
   "name": "io.github.drscrewdriver/dsh-windows-parallel-mcp",
   "title": "Windows Parallel",
   "description": "Drive a Windows window over MCP stdio: quiet by default, one policy ceiling, coded refusals.",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "repository": {
     "url": "https://github.com/drscrewdriver/dsh-windows-parallel-mcp",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "dsh-windows-parallel-mcp",
-      "version": "0.8.1",
+      "version": "0.8.2",
       "transport": {
         "type": "stdio"
       },

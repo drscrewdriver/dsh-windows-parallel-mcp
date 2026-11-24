@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.2 — 2026-11-24
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.2, read from the packument, not from a commit date).
+
+> A 0.8.2 muda uma única frase de recusa -- e a raiz dela no lado dos testes. Quando o ponto está de fato dentro de um filho do alvo mas outra janela o cobre, o motor respondia «nenhum filho do alvo está sob esse ponto»: duas situações distintas dividiam uma frase. Nenhum código de recusa muda (seguem dezessete); o segundo caso agora nomeia a classe da janela que cobre e aponta o único passo útil (trazer o alvo para a frente). Não é suposição: com o navegador do dono por cima de um alvo WinForms (alvo visible=true, o retângulo do seu botão contendo o ponto), enviar WM_LBUTTONDOWN/UP a esse botão responde ok e a aplicação nunca executa o handler -- a legenda continua Press, focusTaken=false. Neste toolkit um clique por mensagem depende da captura do mouse, e uma janela coberta não a obtém. Por isso a primeira correção tentada -- aceitar o ponto porque «uma mensagem não precisa de visibilidade» -- foi revertida: ela fazia o produto relatar sucesso de um clique que não aconteceu. Lado dos testes: llm-action-battery carregava em silêncio a cópia instalada no perfil desktop (0.2.0, enquanto o repositório está em 0.8.1); as duas «falhas de linha de base» dos findings eram essa cópia falando, e ambas desaparecem contra o repositório. Agora ele se recusa a rodar se a superfície testada for outra versão. O braço de foreground passa a amostrar antes e depois de CADA ação em vez de uma vez no início e no fim. O fixture ganha -Topmost (desligado por padrão): só ordem Z, sem tocar no primeiro plano, porque o bloqueio de primeiro plano recusa mesmo SetForegroundWindow de um processo em segundo plano. A bateria libera o worker e tem um limite rígido de 240 s: sem isso, a segunda execução consecutiva travava num worker vazado. Sob lib/ e src/schema/ nada muda.
+
 ## 0.8.1 — 2026-11-24
 
 > Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).

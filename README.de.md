@@ -5,7 +5,7 @@
 > Ein DSH-Plugin, mit dem ein Agent **seine eigenen** Windows-Fenster steuert — standardmäßig still, auf Anfrage sichtbar. Wenn ein Fenster Windows-Nachrichten akzeptiert, wird der Fokus nie entzogen. Wenn nur UI Automation es erreicht, gibt es einen einzigen begrenzten Fokus-Blitz, der automatisch rückgängig gemacht wird. Wenn Sie den Takeover-Modus ausdrücklich anfordern, bewegt sich der Cursor zum Aktionspunkt und wird immer wiederhergestellt; ein HUD bietet drei Möglichkeiten zum Abbruch. Überall anders wird mit Code und Grund abgelehnt.
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.8.1** — this document describes the contract as of that version. What
+> **Current release: 0.8.2** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly

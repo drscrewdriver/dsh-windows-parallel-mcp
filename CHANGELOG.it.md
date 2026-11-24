@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.2 — 2026-11-24
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.2, read from the packument, not from a commit date).
+
+> La 0.8.2 cambia una sola frase di rifiuto -- e la sua radice sul lato test. Quando il punto è davvero dentro un figlio della destinazione ma un'altra finestra lo copre, il motore rispondeva «nessuna finestra figlia della destinazione si trova sotto quel punto»: due situazioni diverse con una frase sola. Nessun codice di rifiuto cambia (restano diciassette); il secondo caso ora nomina la classe della finestra che copre e indica l'unico passo utile (portare la destinazione davanti). Non è una supposizione: con il browser del proprietario sopra una destinazione WinForms (destinazione visible=true, il rettangolo del suo pulsante contiene il punto), inviare WM_LBUTTONDOWN/UP a quel pulsante risponde ok e l'applicazione non esegue mai il gestore -- la didascalia resta Press, focusTaken=false. Su questo toolkit un clic via messaggio richiede la cattura del mouse, e una finestra coperta non la ottiene. La prima correzione provata -- accettare il punto perché «un messaggio non ha bisogno di visibilità» -- è stata quindi annullata: avrebbe riportato successo per un clic mai avvenuto. Lato test: llm-action-battery caricava in silenzio la copia installata nel profilo desktop (0.2.0, mentre il repository è 0.8.1); i due «fallimenti di riferimento» nei findings erano quella copia che parlava, e entrambi spariscono sul repository. Ora rifiuta di partire se la superficie in prova è una versione diversa. Il ramo foreground campiona prima e dopo OGNI azione invece di una volta all'inizio e alla fine. Il fixture guadagna -Topmost (spento di default): solo ordine Z, nessun primo piano, perché il blocco del primo piano rifiuta davvero SetForegroundWindow da un processo in background. La batteria libera il worker e ha un arresto forzato a 240 s: senza, la seconda esecuzione consecutiva si bloccava su un worker rimasto appeso. Sotto lib/ e src/schema/ non cambia nulla.
+
 ## 0.8.1 — 2026-11-24
 
 > Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).

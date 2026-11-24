@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.2 — 2026-11-24
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.2, read from the packument, not from a commit date).
+
+> La 0.8.2 cambia una sola frase de rechazo -- y su raíz en el lado de las pruebas. Cuando el punto está realmente dentro de un hijo del objetivo pero otra ventana lo recubre, el motor respondía «ningún hijo del objetivo está bajo ese punto»: dos situaciones distintas compartían una frase. Ningún código de rechazo cambia (siguen siendo diecisiete); el segundo caso ahora nombra la clase de la ventana que recubre y señala el único paso útil (traer el objetivo al frente). No es una suposición: con el navegador del propietario encima de un objetivo WinForms (objetivo visible=true, el rectángulo de su botón contiene el punto), enviar WM_LBUTTONDOWN/UP a ese botón responde ok y la aplicación nunca ejecuta su manejador -- el título sigue en Press, focusTaken=false. En este toolkit un clic por mensaje necesita la captura del ratón, y una ventana recubierta no la obtiene. Por eso se revirtió el primer arreglo probado -- aceptar el punto porque «un mensaje no necesita visibilidad» --: hacía que el producto informara éxito de un clic que no ocurrió. Lado de pruebas: llm-action-battery cargaba en silencio la copia instalada del perfil de escritorio (0.2.0, cuando el repositorio está en 0.8.1); los dos «fallos de referencia» de los findings eran esa copia hablando, y ambos desaparecen contra el repositorio. Ahora se niega a ejecutarse si la superficie probada es otra versión. Su rama de foreground muestrea antes y después de CADA acción en vez de una vez al inicio y al final. El fixture gana -Topmost (apagado por defecto): solo orden Z, sin tocar el primer plano, porque el bloqueo del primer plano rechaza de verdad SetForegroundWindow desde un proceso en segundo plano. La batería libera su worker y tiene un tope duro de 240 s: sin eso, la segunda ejecución consecutiva se colgaba con un worker filtrado. Bajo lib/ y src/schema/ no cambia nada.
+
 ## 0.8.1 — 2026-11-24
 
 > Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).

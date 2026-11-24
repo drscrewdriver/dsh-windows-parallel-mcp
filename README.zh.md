@@ -5,7 +5,7 @@
 > 一个让代理驱动**自己**的 Windows 窗口的 DSH 插件——默认静默，按需可见。窗口接受窗口消息时完全不夺焦点；只有 UI Automation 可达时，焦点仅发生一次有界闪烁并自动还原；显式请求接管档时，光标移动到目标点并始终还原，HUD 提供三种中断方式。其他情况一律拒绝，并给出代码与原因。
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.8.1** — this document describes the contract as of that version. What
+> **Current release: 0.8.2** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly

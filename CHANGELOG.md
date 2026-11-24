@@ -5,6 +5,44 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.2 — 2026-11-24
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.2, read from the packument, not from a commit date).
+
+**A refusal that said "no child window sits under that point" when the truth was "something is painted over
+it".** Both are refusals and neither verdict changed; what changed is that the second now says so, names the
+blocking window class, and gives the only next step that works. The distinction earns its own sentence because
+the two have nothing in common: a wrong coordinate is the caller's mistake, and a covered point is a desktop
+state the caller can fix by bringing the target forward.
+
+The behaviour behind it was measured rather than assumed. With the owner's browser covering a WinForms target
+(target `visible=true`, its own button rectangle holding the point), `WM_LBUTTONDOWN`/`WM_LBUTTONUP` delivered
+to that button answered `ok` and the application never ran its handler -- the caption stayed `Press`,
+`focusTaken=false`. A message press needs the mouse capture on this toolkit, and a covered window does not get
+it. So the first fix attempted here -- accept the point, because "a window message needs no visibility" --
+was reverted: it made the product report success for a click that did not happen. `unreachable` stays the code
+for both worlds; only the reason now tells them apart.
+
+### Fixed
+
+- The covered-point refusal names the blocker (`blocker class=...`) and points at the next step instead of
+  reusing the wrong-coordinate sentence. No new refusal code: the vocabulary is unchanged at seventeen.
+- `test/llm-action-battery.mjs` measures THIS repository. It used to load the desktop profile's installed copy
+  silently, which sat at 0.2.0 while the repo was 0.8.1 -- the two "baseline failures" recorded in the plan's
+  findings were that copy talking, and both disappear against the checkout. It now refuses to run when the
+  surface under test is a different version.
+- Its foreground arm samples before and after EACH action instead of once at each end. The old shape measured
+  who held the foreground at the end, which the fixture's own `Show()`, the OS hand-back, and an app taking
+  focus while handling a click all move.
+- `scripts/winforms-target.ps1` gains `-Topmost` (default off): Z-order only, no foreground permission. The
+  foreground lock refuses a background process's `SetForegroundWindow` -- measured twice here -- so a test
+  that needs its own pixels visible cannot get them by asking to be raised.
+- The battery disposes its sidecar and has a 240 s hard stop; without them the second consecutive run hung on
+  a leaked worker.
+
+Nothing under `lib/` or `src/schema/` changed: eleven actions, seventeen codes, the policy ceiling and the
+audit line are byte-identical to 0.8.1.
+
 ## 0.8.1 — 2026-11-24
 
 > Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).

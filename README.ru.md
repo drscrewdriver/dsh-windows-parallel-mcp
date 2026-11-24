@@ -5,7 +5,7 @@
 > Плагин DSH, позволяющий агенту управлять **своими** окнами Windows — по умолчанию тихо, по запросу видимо. Когда окно принимает сообщения Windows, фокус никогда не перехватывается. Когда доступен только UI Automation, фокус претерпевает одну ограниченную вспышку и автоматически возвращается. При явном запросе режима takeover курсор перемещается в точку действия и всегда восстанавливается, а HUD предлагает три способа прерывания. Во всех остальных случаях действие отклоняется с кодом и причиной.
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.8.1** — this document describes the contract as of that version. What
+> **Current release: 0.8.2** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly

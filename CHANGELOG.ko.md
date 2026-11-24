@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.2 — 2026-11-24
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.2, read from the packument, not from a commit date).
+
+> 0.8.2 는 거절 문장 하나와 그 테스트 쪽 뿌리만 고친다. 점이 실제로는 대상의 자식 창 안에 있는데 다른 창에 가려져 있을 때, 엔진은 «그 점 아래에 대상의 자식 창이 없다»고 답했다 — 서로 다른 두 상황이 같은 말을 쓰고 있었다. 거절 코드는 17개 그대로이고, 달라진 것은 두 번째 경우가 가리고 있는 창 클래스를 지목하고 유일하게 통하는 다음 단계(대상을 앞으로 가져오기)를 제시한다는 점이다. 추측이 아니다: 소유자의 브라우저를 WinForms 대상 위에 덮고(대상 visible=true, 버튼 사각형이 그 점을 포함) 그 버튼에 WM_LBUTTONDOWN/UP 을 보내면 ok 가 오지만 애플리케이션은 핸들러를 실행하지 않았다(caption 은 Press 그대로, focusTaken=false). 이 툴킷의 메시지 클릭은 마우스 캡처를 필요로 하고, 가려진 창은 그것을 얻지 못한다. 그래서 먼저 시도한 «메시지는 가시성을 요구하지 않으니 점을 받아들이자»는 되돌렸다 — 일어나지 않은 클릭에 성공을 보고하는 일이기 때문이다. 테스트 쪽: llm-action-battery 는 desktop profile 의 설치본(0.2.0, 저장소는 0.8.1)을 조용히 읽고 있었다. 계획 findings 의 «기준 실패» 두 건은 그 복사본이 말한 것이고, 저장소로 바꾸면 둘 다 사라진다. 이제 피시험물 버전이 다르면 실행을 거절한다. foreground 갈래는 각 동작 전후로 표본을 뜨게 바꿨다(예전에는 처음과 끝 한 번씩, 즉 ‘마지막에 누가 앞에 있는가’를 쟀다). fixture 에 기본 꺼짐인 -Topmost 를 추가했다(Z 순서만 바꾸고 앞단은 건드리지 않는다. 앞단 잠금이 백그라운드 프로세스의 SetForegroundWindow 를 실제로 거절했다). 배터리는 dispose 와 240초 강제 종료를 갖췄다(없으면 연속 두 번째 실행이 누수된 worker 에서 멈춘다). lib/ 와 src/schema/ 는 무변경.
+
 ## 0.8.1 — 2026-11-24
 
 > Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).
