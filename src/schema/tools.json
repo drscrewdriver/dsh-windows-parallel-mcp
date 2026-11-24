@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1.0",
-  "status": "form decided 2026-11-19: A = DSH native plugin (no MCP). The eight named tools below stay the canonical ACTION surface; the host projection (see hostProjection) exposes them as one tool with an action discriminator, which is this host's convention for a multi-action capability.",
+  "status": "form decided 2026-11-19: A = DSH native plugin. PARTLY REVERSED 2026-11-23 for 0.8.0: the same engine is ALSO an MCP stdio server (see mcpProjection), because the MCP Registry accepts MCP servers only and DSH can bridge one -- one implementation, two channels. The eleven named tools below stay the canonical ACTION surface, and BOTH delivery forms expose them as one tool with an action discriminator, which is the projection the token argument decided on.",
   "hostProjection": {
     "form": "A",
     "decided": "2026-11-19",
@@ -27,7 +27,24 @@
       { "action": "pause", "exposed": false, "why": "owner control, behind the settings pill rather than the model's reach" }
     ]
   },
+  "mcpProjection": {
+    "form": "stdio MCP server, JSON-RPC 2.0, zero dependencies",
+    "decided": "2026-11-23",
+    "reversal": "the 2026-11-19 note said 'no MCP'. That was a decision about the DELIVERY CHANNEL, not about the action surface, and it is reversed here on purpose: the Registry only accepts MCP servers, and @deepseek-ai/dsh-mcp-client can bridge one into DSH, so one implementation now reaches two channels instead of one.",
+    "why": "the token argument for one-tool-with-discriminator does not weaken over a transport. `tools/call` accepts an arbitrary argument object, so eleven resident schemas would still be a standing cost with no added capability.",
+    "package": "dsh-windows-parallel-mcp",
+    "bin": "wpm-mcp",
+    "entry": "lib/mcp-server.mjs",
+    "tool": "wpm",
+    "discriminator": "action",
+    "schemaSource": "src/schema/tools.json -- tools/list is GENERATED at start-up from the `tools` array below (one oneOf branch per action, its properties/required/additionalProperties copied field for field), never transcribed; scripts/check-mcp-schema.mjs keeps that honest",
+    "implementationSource": "lib/index.js#apply -- the same host half the DSH form uses, so toRequest(), the gate order, the refusal vocabulary, the policy ceiling, the audit line and format() are shared code, not a second copy",
+    "settingsSource": "process environment (WPM_*), never a call argument: a client that could raise its own `policy` or add itself to `appLaunchAllow` would make the authorization model decorative",
+    "imageContent": "a screenshot is attached as base64 image content in tools/call, because a file path is meaningless to a caller that is not on this machine (WPM_MCP_NO_IMAGE=1 opts out)",
+    "transportDiscipline": "stdout is the protocol channel and nothing else is written there; a notification gets no reply; a non-JSON line gets -32700 with a null id and the server survives; an unknown method gets -32601 and the server survives; replies are keyed by id because the worker is asynchronous."
+  },
   "notes": [
+    "0.8.0 adds NO action and NO refusal code. It adds a second transport for the same eleven actions, which is why `mcpProjection` names this file as the schema source: two delivery forms describing one engine is exactly the shape that drifts when one of them is copied.",
     "The eleven tool names are fixed here so both delivery forms expose the same action surface.",
     "src/engine/engine.ps1 is the only implementation; this file is the contract, not a second implementation.",
     "docs/refusals.md is the human-readable form of `refusals`; scripts/check-refusals.mjs keeps them equal.",

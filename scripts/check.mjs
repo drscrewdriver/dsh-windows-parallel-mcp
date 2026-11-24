@@ -149,6 +149,17 @@ pass = run('policy ladder: contract = host = engine (self-tested)', () => {
   return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
 }) && pass;
 
+// 0.8.0's own gate, and the one claim it exists to keep: the MCP `tools/list` answer is GENERATED from
+// src/schema/tools.json rather than transcribed. The check runs against the real server over real stdio,
+// because a unit test of the generator could not see a transport that prints something else. Its
+// self-test mutates both sides: four server-side edits must turn it red, and two CONTRACT-side edits
+// (rename a parameter, flip additionalProperties in tools.json) must stay green AND move -- an arm that
+// only ever breaks the generator cannot tell generated from copied, which is the difference R6 lives on.
+pass = run('mcp tools/list = contract file (self-tested)', () => {
+  const r = spawnSync(process.execPath, ['scripts/check-mcp-schema.mjs', '--self-test'], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: ((r.stdout || '') + (r.stderr || '')).trim() };
+}) && pass;
+
 // The package that gets installed is the product. A missing engine file or a swept-in .tmp/ both
 // install cleanly and fail later, so the tarball is checked here rather than discovered at install.
 pass = run('package tarball contents', () => {
@@ -165,7 +176,13 @@ pass = run('host half + sidecar (process)', () => {
   // signal-test included: a shim that drops the call context (`exec`) silently disables host cancellation,
   // and that failure is invisible to every other arm here. It creates its own target window and types
   // through the message door, so it does not depend on what is on screen.
-  for (const file of ['test/plugin-test.mjs', 'test/worker-smoke.mjs', 'test/signal-test.mjs']) {
+  // mcp-stdio included: the second delivery form's transport discipline (one tool, keyed replies, a
+  // notification that stays silent, a malformed line that does not kill the loop, a refusal code that
+  // arrives verbatim) is only observable from outside the process.
+  // mcp-bridge included, and it is the arm that can NAMED-SKIP: it drives the MCP client SDK and the
+  // tool-definition code the DSH host itself ships, so on a machine without a DSH install it says so
+  // and exits 0 rather than pretending the bridge was verified.
+  for (const file of ['test/plugin-test.mjs', 'test/worker-smoke.mjs', 'test/signal-test.mjs', 'test/mcp-stdio.mjs', 'test/mcp-bridge.mjs']) {
     const r = spawnSync(process.execPath, [file], { encoding: 'utf8' });
     if (r.status !== 0) good = false;
     const tail = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(-1)[0] || '';

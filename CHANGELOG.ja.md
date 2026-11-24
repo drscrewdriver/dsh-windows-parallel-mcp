@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.0, read from the packument, not from a commit date).
+
+> 0.8.0 は同じエンジンに第二のチャネルを増やしたが、第二の実装は作っていない。stdio の MCP サーバー（bin: wpm-mcp）を新設し、DSH プラグイン形態は一切変えない——同じ apply()、同じ 11 アクション、同じ 17 の拒否コード、同じゲート順序と同じ監査ログ。これは 2026-11-19 の決定「form = A、MCP は作らない」の意図的な撤回で、撤回はコミットメッセージではなく契約ファイルに書かれた：tools.json に mcpProjection が hostProjection と並んで入り、status 行が「どの決定をいつ、なぜ撤回したか」（Registry は MCP サーバーしか受けず、DSH はそれをブリッジできるため、1 つの実装で 2 つのチャネルに届く）を明言する。本番はアクションも拒否コードも増やさず、src/engine/ は 0 ファイル変更。tools/list は tools.json から生成（転写ではない）：アクションごとに 1 つの oneOf 分岐が properties/required/additionalProperties をフィールド単位で継承し、action の enum は契約のアクション表そのもの、説明では各アクションが宣言した段とともに載り、各拒否コードは契約が持つ要約をそのまま使う。公開するツールは依然 wpm 1 個だけ。設定は環境変数（WPM_*）のみで、呼び出し引数からは読まない——自分の天井を自分で上げたり launch 許可表に自分を加えられる呼び出し元は認証モデルを飾り物にするから。既定値は lib/index.js の 1 箇所にだけ残る。スクリーンショットはテキストに加えて base64 の image content を返す（パイプの向こうではこのマシンのパスを開けない）が、screenRect/scale/identity/frame/captureBackend は必ずテキスト側に残る。DSH ブリッジ経由で実測：添付ストアが無いホストでは画像は [image unavailable: …] のテキストに縮退し数値は全部残る。つまりピクセルを既定で添付することは、呼び出し元が本来必要とした情報を奪わない。server.json は Registry マニフェスト（namespace io.github.drscrewdriver/dsh-windows-parallel-mcp、Registry が認める唯一の npm 源、stdio 転送、19 の環境変数。schema-test は「宣言するものは読む／読むものは宣言する」を双方向で検証）。2 つを実際に修正：不正引数が -32603（サーバー障害）として返されかけていた点をツールレベルのエラーに分類し直し、引数名を本文に残す。Windows で npm は .cmd のため execFileSync が ENOENT を投げ「DSH が未インストール」に見える問題も解消。新ゲート 22 check-mcp-schema は実サーバーを起動して実応答を契約とフィールド単位で突き合わせ、self-test は両側を壊す：サーバー側 4 変更は必ず赤、契約側 2 変更（引数のリネーム、additionalProperties の反転）は必ず緑のまま、かつ必ず追随する——生成器だけを壊す検査では「生成」と「今日たまたま一致する転写」を区別できない。mcp-stdio は 38 検証（stdout に非 JSON 行が 1 つもない、通知は無応答、ゴミ行で殺れない、同時実行は id で対応づき交換されない、stdin クローズで exit 0）、mcp-bridge は 17 検証（ホスト同梱の client SDK と createMcpToolDefinition を使い、両形態を同一プロセスで呼んで先頭行が一致することを確認。DSH が無い環境では正直に SKIP）。全体ゲート 22 腕 ×3 GATE GREEN。権威あるのは英語版。
+
 ## 0.7.0 — 2026-11-23
 
 > Published 2026-11-23T18:54:04.951Z (registry `time` for 0.7.0, read from the packument, not from a commit date).

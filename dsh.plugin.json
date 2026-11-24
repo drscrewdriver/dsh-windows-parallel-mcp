@@ -1,6 +1,6 @@
 {
   "id": "dsh-external/dsh-windows-parallel-mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "main": "./lib/index.js",
   "description": "One tool, eleven actions: drive a Windows window quietly by default, read the target as a numbered element frame, and since 0.7.0 start a whitelisted program, touch the clipboard, and change one named window. Prefers window messages (zero foreground change); falls back to UI Automation with a bounded, self-reversing focus flash (measured net return 15-95 ms); offers an opt-in takeover tier (policy:'full' AND takeoverAllowed) where the cursor moves to the action point and is always restored, with a mandatory three-phase HUD and three interruption paths; adds snapshot/screenshot/preview, where labels address the UIA element itself and image coordinates are converted by the engine; reads a write back (effect=readback-verified only when the field's own value matches a prediction built from the control's measurements) with caretPosition, disabled/focus reporting and a BitBlt capture path named as captureBackend; and gates everything through one ceiling (policy) plus a per-program launch whitelist, an idle check that refuses instead of interrupting, and an append-only JSONL audit log.",
   "engines": {
@@ -10,7 +10,7 @@
     "tools": [
       {
         "name": "wpm",
-        "description": "Drive a Windows window quietly by default (actions: windows, status, click, type, focus, snapshot, screenshot, preview), with an opt-in takeover tier that is visible, interruptible and always restores the cursor, and a read surface whose numbered labels address the element itself."
+        "description": "Drive a Windows window quietly by default through eleven actions (windows, status, click, type, focus, snapshot, screenshot, preview, launch, clipboard, window), with an opt-in takeover tier that is visible, interruptible and always restores the cursor, a read surface whose numbered labels address the element itself, and a read-back that only grants effect=readback-verified when the field's own value agrees. Everything sits under one policy ceiling and every call, allowed or refused, leaves one audit row. The same engine is also reachable as an MCP stdio server (bin: wpm-mcp)."
       }
     ],
     "skills": []

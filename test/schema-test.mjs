@@ -1,7 +1,7 @@
 // schema-test.mjs — the action contract, checked as a contract rather than as a file that exists.
 //
 // WHY THIS IS A TEST AND NOT REVIEW. src/schema/tools.json is the surface a model branches on:
-// eight tools, their arguments, and the refusal codes each can return. Four classes of mistake in
+// eleven actions, their arguments, and the refusal codes each can return. Four classes of mistake in
 // it are invisible until an agent is already confused at runtime:
 //   * a required field that is not declared in properties (the model cannot know the type);
 //   * an argument accepted by a case but rejected by the schema (the documented example is wrong);
@@ -102,14 +102,15 @@ for (const tool of schema.tools) {
 }
 
 // --- the host projection agrees with the registered parameters ------------------------------
-// The form is decided (A: DSH native plugin, spec.md R3.1'). That makes the projection part of the
-// contract rather than a private detail: the eight named actions are what the docs promise, the one
-// registered tool is what the model actually gets, and the two must describe the same capability.
+// The form is decided (A: DSH native plugin, spec.md R3.1', plus the 0.8.0 stdio form below). That makes
+// the projection part of the contract rather than a private detail: the eleven named actions are what the
+// docs promise, the one registered tool is what the model actually gets, and the two must describe the
+// same capability.
 {
   const proj = schema.hostProjection;
   if (!proj) fail('no hostProjection -- the delivery form is decided, so the projection belongs in the contract');
   else {
-    if (proj.form !== 'A') fail(`hostProjection.form is '${proj.form}'; the owner chose A on 2026-11-19`);
+    if (proj.form !== 'A') fail(`hostProjection.form is '${proj.form}'; the owner chose A on 2026-11-19 and 0.8.0 did not replace it -- the MCP form is listed beside it as mcpProjection`);
     if (!proj.why) fail('hostProjection has no stated reason');
     const contractNames = schema.tools.map((t) => t.name).sort();
     const mappedNames = Object.keys(proj.actions ?? {}).sort();
@@ -139,6 +140,50 @@ for (const tool of schema.tools) {
     }
     // And the model-facing parameter names must not include an input-method switch.
     if ('physical' in PARAMETERS) fail('registered parameters expose a physical field');
+  }
+}
+
+// --- the 0.8.0 second form must be declared, and must be the SAME surface ----------------------
+// Two delivery channels over one engine is the arrangement most likely to drift (risk R6), so the
+// contract states both and this test states what they owe each other: same tool name, same
+// discriminator, same action set, and every source it claims to read actually present on disk.
+{
+  const mcp = schema.mcpProjection;
+  if (!mcp) fail('no mcpProjection -- 0.8.0 ships a second delivery form, and an undeclared form is how two copies start disagreeing');
+  else {
+    const host = schema.hostProjection ?? {};
+    if (mcp.tool !== host.tool) fail(`mcpProjection.tool '${mcp.tool}' != hostProjection.tool '${host.tool}' -- one tool name across both forms is the whole point`);
+    if (mcp.discriminator !== host.discriminator) fail(`mcpProjection.discriminator '${mcp.discriminator}' != hostProjection.discriminator '${host.discriminator}'`);
+    if (mcp.package !== host.package) fail(`mcpProjection.package '${mcp.package}' != hostProjection.package '${host.package}'`);
+    if (!mcp.why || !mcp.reversal) fail('mcpProjection must carry both its reason and the reversal of the 2026-11-19 decision -- a reversed decision that is not named reads as an accident');
+    if (!/tools\/list is GENERATED/.test(String(mcp.schemaSource ?? ''))) fail('mcpProjection must say the schema is generated from this file, not copied');
+    for (const f of [mcp.entry, String(mcp.schemaSource ?? '').split(' --')[0], String(mcp.implementationSource ?? '').split('#')[0]]) {
+      if (f && !existsSync(f)) fail(`mcpProjection points at a missing file: ${f}`);
+    }
+    // The bin entry the Registry and the DSH bridge both use must exist in package.json.
+    const pkgJson = JSON.parse(readFileSync('package.json', 'utf8'));
+    const norm = (p) => String(p ?? '').replace(/^\.\//, '');
+    if (norm(pkgJson.bin?.[mcp.bin]) !== norm(mcp.entry)) fail(`package.json bin['${mcp.bin}'] is ${JSON.stringify(pkgJson.bin?.[mcp.bin])}, expected ${mcp.entry}`);
+    if (!pkgJson.files?.includes('server.json')) fail('package.json files does not ship server.json -- the Registry cannot install what the tarball dropped');
+    // server.json must be about THIS package, at THIS version, over stdio from THAT bin.
+    const sj = JSON.parse(readFileSync('server.json', 'utf8'));
+    if (sj.name !== `io.github.${(pkgJson.repository?.url ?? '').split('github.com/')[1]?.split('/')[0] ?? '?'}/${(pkgJson.name ?? '').split('/').pop()}`)
+      fail(`server.json name '${sj.name}' does not match the GitHub namespace derived from package.json`);
+    if (sj.version !== pkgJson.version) fail(`server.json version '${sj.version}' != package.json version '${pkgJson.version}' -- a Registry entry pinned to a version that is not the one shipping installs the wrong engine`);
+    const p0 = sj.packages?.[0] ?? {};
+    if (p0.version !== pkgJson.version) fail(`server.json packages[0].version '${p0.version}' != package.json version '${pkgJson.version}'`);
+    if (p0.identifier !== pkgJson.name) fail(`server.json packages[0].identifier '${p0.identifier}' != package name '${pkgJson.name}'`);
+    if (p0.transport?.type !== 'stdio') fail(`server.json transport is ${JSON.stringify(p0.transport)}; this form is stdio, and no HTTP/SSE surface exists or is planned`);
+    if (!Array.isArray(sj.packages) || sj.packages.length !== 1) fail(`server.json must describe exactly the one npm package this repo is, got ${sj.packages?.length}`);
+    // Every environment variable server.json advertises has to be one the server actually reads, and
+    // every one the server reads has to be advertised: a hidden switch is an unenforceable one.
+    const serverSrc = readFileSync('lib/mcp-server.mjs', 'utf8');
+    const declared = new Set((p0.environmentVariables ?? []).map((e) => e.name));
+    const read = new Set([...serverSrc.matchAll(/WPM_[A-Z_0-9]+/g)].map((m) => m[0]));
+    const undocumented = [...read].filter((n) => !declared.has(n));
+    const nonExistent = [...declared].filter((n) => !read.has(n));
+    if (undocumented.length) fail(`server.json does not document env vars the server reads: ${undocumented.join(', ')}`);
+    if (nonExistent.length) fail(`server.json advertises env vars the server never reads: ${nonExistent.join(', ')}`);
   }
 }
 

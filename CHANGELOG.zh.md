@@ -8,6 +8,12 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.0, read from the packument, not from a commit date).
+
+> 0.8.0 让同一个引擎多开一条通道，而第二条不是第二份实现：新增 stdio MCP server（bin: wpm-mcp），DSH 插件形态一行未改——同一个 apply()、同样的 11 个动作、同样的 17 个拒绝码、同样的闸序与审计。这是对 2026-11-19「form = A，不做 MCP」的有意反转，并且反转写进契约文件而不是只留在提交信息里：tools.json 新增 mcpProjection 与 hostProjection 并列，status 行明写哪条决定被反转、何时、为何（Registry 只收 MCP server，而 DSH 能桥接一个，于是一份实现触达两个渠道）。本批未新增动作、未新增拒绝码，src/engine/ 下零改动。tools/list 由 tools.json 生成而非抄写：每个动作一个 oneOf 分支，其 properties/required/additionalProperties 逐字段来自该动作的声明，action 枚举即契约动作表，描述里每个动作都带自己声明的档位、每个拒绝码都带契约已有的那句摘要。仍只暴露 1 个工具 wpm。设置只来自环境变量（WPM_*），绝不来自调用参数——能自己抬天花板或往白名单里加自己的调用方会让授权模型形同虚设；默认值仍只在 lib/index.js 一处。截图除文本外附带 base64 image 内容（管道那端打不开本机路径），而 screenRect/scale/identity/frame/captureBackend 始终在文本里；实测过 DSH 桥：宿主没有附件存储时会把图片降级成 [image unavailable: …] 文本而数字全部保留，因此默认附图为像素不会让调用方丢掉它真正需要的信息。server.json 为 Registry 清单（命名空间 io.github.drscrewdriver/dsh-windows-parallel-mcp、唯一可接受的 npm 源、stdio 传输、19 个环境变量，schema-test 双向断言「声明的都会读、读的都声明」）。修掉两处：非法参数本会被当成 -32603 服务端故障（现为题级错误并明写是哪个参数），以及 execFileSync 找 npm 在 Windows 上 ENOENT 导致「本机没装 DSH」的假象。第 22 道门禁 check-mcp-schema 起真服务读真响应并与契约逐字段比对，self-test 同时变异两侧：4 个服务端改动必须见红，2 个契约侧改动（改名一个参数、翻转一个 additionalProperties）必须保持绿且必须跟着变——只破坏生成器无法区分「生成」与「今天恰好一致的抄写」。mcp-stdio 38 条断言（stdout 无一行非 JSON、通知不回复、垃圾行不杀进程、并发按 id 配对不串号、stdin 关闭 exit 0），mcp-bridge 17 条（用宿主自带的 client SDK 与 createMcpToolDefinition，两形态同进程调用首行输出必须相同；无 DSH 安装时如实 SKIP）。全量门禁 22 臂 ×3 GATE GREEN。详情见英文权威条目。
+
 ## 0.7.0 — 2026-11-23
 
 > Published 2026-11-23T18:54:04.951Z (registry `time` for 0.7.0, read from the packument, not from a commit date).

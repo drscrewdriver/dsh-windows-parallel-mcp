@@ -1,6 +1,6 @@
 {
   "name": "dsh-windows-parallel-mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publishConfig": {
     "access": "public",
     "tag": "latest",
@@ -30,6 +30,9 @@
   "type": "module",
   "main": "lib/index.js",
   "types": "types/index.d.ts",
+  "bin": {
+    "wpm-mcp": "./lib/mcp-server.mjs"
+  },
   "exports": {
     ".": {
       "types": "./types/index.d.ts",
@@ -37,6 +40,7 @@
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./dsh.plugin.json": "./dsh.plugin.json",
+    "./server.json": "./server.json",
     "./src/engine/*": "./src/engine/*",
     "./package.json": "./package.json"
   },
@@ -45,6 +49,7 @@
     "types/",
     "src/engine/",
     "src/schema/",
+    "server.json",
     "docs/refusals.md",
     "docs/takeover.md",
     "CHANGELOG.md",
@@ -102,6 +107,8 @@
     "test": "node scripts/check.mjs && node test/plugin-test.mjs && node test/worker-smoke.mjs",
     "test:decide": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/decide-test.ps1",
     "test:refusals": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/refusals-test.ps1",
+    "test:mcp": "node test/mcp-stdio.mjs",
+    "mcp": "node lib/mcp-server.mjs",
     "test:hud": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File test/hud-test.ps1",
     "test:takeover": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File test/takeover-test.ps1",
     "test:keyinject": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File test/keyinject-test.ps1",

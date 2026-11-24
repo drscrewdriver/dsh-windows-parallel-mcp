@@ -12,6 +12,7 @@
 //
 // Exit code 1 on any problem.
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 
 const REQUIRED = [
   'package.json',
@@ -29,6 +30,8 @@ const REQUIRED = [
   'src/engine/decide.ps1',
   'src/engine/win.ps1',
   'src/schema/tools.json',
+  'server.json',
+  'lib/mcp-server.mjs',
   'docs/refusals.md',
   'README.md',
 ];
@@ -78,6 +81,20 @@ if (ps1.length === 0) problems.push('the package contains no .ps1 file at all --
 
 const sizeMb = (entry?.unpackedSize ?? 0) / 1024 / 1024;
 if (sizeMb > 5) problems.push(`unpacked size ${sizeMb.toFixed(1)} MB -- a plugin with a script engine should be far under 5 MB`);
+
+// 0.8.0 adds a COMMAND, and a command has two failure modes that both look fine in a file listing:
+// a `bin` entry whose target npm did not include (the install succeeds and the command does not exist),
+// and an entry file with no shebang (npm links it happily, the OS refuses to run it). Both are checked
+// against what the tarball actually contains, not against what package.json claims.
+const pkgJson = JSON.parse(readFileSync('package.json', 'utf8'));
+for (const [cmd, target] of Object.entries(pkgJson.bin ?? {})) {
+  const rel = String(target).replace(/^\.\//, '');
+  if (!files.includes(rel)) problems.push(`bin['${cmd}'] points at ${rel}, which is not in the package`);
+  if (!existsSync(rel)) problems.push(`bin['${cmd}'] points at ${rel}, which does not exist in the repo either`);
+  else if (!readFileSync(rel, 'utf8').split('\n')[0].startsWith('#!'))
+    problems.push(`${rel} has no shebang -- it is linked as \`${cmd}\` and nothing can execute it`);
+}
+if (!files.includes('server.json')) problems.push('server.json is not in the package: the MCP Registry reads it out of the tarball, and an unshipped manifest is an unpublished form');
 
 if (problems.length) {
   console.error(`FAIL: ${problems.length} packaging problem(s).\n`);

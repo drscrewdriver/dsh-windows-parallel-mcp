@@ -15,6 +15,7 @@
     "lib/engine.js",
     "lib/host-tools.js",
     "lib/index.js",
+    "lib/mcp-server.mjs",
     "lib/peers-schemastery.js",
     "lib/peers-tools.js",
     "lib/policy.js",

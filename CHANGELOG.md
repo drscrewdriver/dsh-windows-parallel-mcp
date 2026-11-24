@@ -5,6 +5,107 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
+## 0.8.0 — 2026-11-23
+
+> Published <REGISTRY-TIME> (registry `time` for 0.8.0, read from the packument, not from a commit date).
+
+**One engine, two channels, and the second one is not a second implementation.** The package is now also
+an MCP server over stdio (`bin: wpm-mcp`), while the DSH plugin form is untouched: same `apply()`, same
+exports, same eleven actions, same seventeen codes, same gates, same audit line. This reverses the
+2026-11-19 decision "form = A, no MCP" — on purpose, and in the contract file rather than in a commit
+message: `src/schema/tools.json` gained `mcpProjection` beside `hostProjection`, and its `status` line
+now says which decision was reversed, when, and for what reason (the Registry accepts MCP servers only,
+and DSH can bridge one, so one implementation reaches two channels instead of one). No action and no
+refusal code were added. **Zero files under `src/engine/` changed.**
+
+### Added — the stdio form
+
+- **`lib/mcp-server.mjs`** — JSON-RPC 2.0 over stdin/stdout with Node built-ins, **no
+  `@modelcontextprotocol/sdk`**: `initialize`, `ping`, `tools/list`, `tools/call`; an unknown method gets
+  `-32601` and the process survives it; a non-JSON line gets `-32700` with a null `id` and the loop
+  survives it; a notification gets no reply at all; replies are keyed by `id` because the sidecar is
+  asynchronous and assuming FIFO would be inventing a second protocol; closing stdin disposes the worker
+  and exits 0. `tools/call` forwards into the existing `toRequest()` / `format()`, so refusal codes come
+  back verbatim as the first token of the text — this file does not soften, renumber or re-explain a
+  refusal. The plugin's logger is handed stderr: `ctx.logger ?? console` would otherwise print warnings
+  **into the JSON stream** and corrupt the transport for every client reading it.
+- **`tools/list` is generated from `src/schema/tools.json`, not transcribed** — one `oneOf` branch per
+  action carrying that action's `properties`, `required` and `additionalProperties` field for field, an
+  `action` enum that is the contract's action list, and a description that pairs every action with the
+  rung it declares and lists every refusal code with the summary the contract already carries. Nothing
+  in the server spells out an action name, a parameter name or a code, which is the only reason the two
+  forms cannot drift into disagreeing about what they both promise (risk R6).
+- **One tool, not eleven** — `wpm` with an `action` discriminator, because the 0.5.0 token argument
+  survives a transport and `tools/call` accepts an arbitrary argument object anyway.
+- **Settings come from the environment, never from the call** — the `WPM_*` set is read at start-up and
+  only where present, so the defaults stay exactly where they were (`lib/index.js`) instead of being
+  copied. A caller that could set its own `policy` or append to `appLaunchAllow` would make the
+  authorization model decorative, and over stdio the process owner is the trust boundary that a profile
+  is inside DSH.
+- **A screenshot returns pixels as well as numbers** — the PNG is attached as base64 `image` content,
+  because a file path is meaningless to a caller that is not on this machine; the text block still carries
+  `screenRect` / `imageSize` / `scale` / `identity` / `frame` / `captureBackend`, and `WPM_MCP_NO_IMAGE=1`
+  opts out of the attachment. Measured across the DSH bridge: a host with no attachment store projects the
+  image into an `[image unavailable: …]` diagnostic and keeps every number, so defaulting to "attach"
+  cannot cost a caller the information it needed the call for.
+- **`server.json`** — the MCP Registry manifest: namespace `io.github.drscrewdriver/dsh-windows-parallel-mcp`,
+  one npm package entry pinned to this version (`https://registry.npmjs.org`, which is the only base URL
+  the Registry accepts), `transport: stdio`, and **nineteen** documented environment variables — every one
+  the server reads and nothing it does not, which `test/schema-test.mjs` now asserts in both directions.
+
+### Changed — the contract and the package, not the behaviour
+
+- `src/schema/tools.json` carries `mcpProjection` (form, decision date, reversal, why, tool, discriminator,
+  schema source, implementation source, settings source, image content, transport discipline) beside the
+  unchanged `hostProjection`, plus a note that 0.8.0 adds a second transport and no capability.
+- `package.json` gained `bin.wpm-mcp`, `exports["./server.json"]` and `server.json` in `files`; the
+  `test:mcp` and `mcp` scripts exist so the form is runnable from a checkout.
+- `dsh.plugin.json`'s contributed-tool description was stale — it still listed eight actions. It now names
+  eleven, names the read-back and the ceiling, and says the engine is also reachable as an MCP stdio
+  server. A manifest that describes an older release is how a plugin gets judged for something it no
+  longer does.
+- `scripts/check-pack.mjs` requires `server.json` and `lib/mcp-server.mjs` in the tarball, and checks every
+  `bin` target against the listing: a command npm did not ship, or an entry file without a shebang, both
+  install cleanly and fail at run time.
+
+### Fixed
+
+- **An invalid argument was on its way to being reported as a server fault.** `tools/call` with
+  `action:'not-an-action'` reaches argument validation, which throws `ToolArgsError`; the first version of
+  the MCP handler mapped any thrown error without a refusal `code` to `-32603` — telling a client its own
+  request was our internal error. It is now a tool-level error whose text names the argument, and the wire
+  test asserts the classification from outside the process.
+- **A locator that read as an absence.** Finding the DSH install with `execFileSync('npm', …)` throws
+  ENOENT on Windows because `npm` is a `.cmd` — so the bridge test reported "no DSH install" on a machine
+  that has one, and a permanent silent SKIP is how an unverified claim slips through.
+
+### Gates and tests
+
+- **Gate 21 → 22: `scripts/check-mcp-schema.mjs`.** It starts the real server over real stdio, reads what a
+  client would read, and compares it field by field with the contract file. `--self-test` mutates **both
+  sides**: four server-side edits (drop the property spread, stop listing refusal codes, hard-write the
+  action enum, freeze every rung) must turn it red, and two contract-side edits (rename a parameter,
+  flip one `additionalProperties` in `tools.json`) must stay green **and move** — an arm that only breaks
+  the generator cannot distinguish a generated schema from a transcribed one that happens to agree today.
+  All six seen.
+- **`test/mcp-stdio.mjs` (38 assertions)** — the transport itself: one tool; the action enum equal to the
+  contract's; every branch matching its entry field by field; a policy refusal arriving with its code and
+  `isError`; `structuredContent` mirroring the DSH result; a screenshot carrying `text` + `image`; `-32602`
+  for an unknown tool; a notification producing no line; a garbage line answered with `-32700` and a null
+  `id`; two concurrent calls matched by id and not swapped; **not one stdout line that was not JSON**; exit
+  0 on stdin close.
+- **`test/mcp-bridge.mjs` (17 assertions)** — the bridge with the host's own code: `@modelcontextprotocol/client`
+  2.2.0 negotiates with us and accepts our `initialize` and `tools/list` shapes, and
+  `createMcpToolDefinition` from `@deepseek-ai/dsh-mcp-client` produces a tool whose parameters survived
+  the trip, whose refusal message still starts with `policy_denied`, and whose screenshot keeps its
+  mapping when no attachment store is mounted. Then both forms are called in one process and their first
+  output lines must be identical. It NAMED-SKIPs where no DSH install exists, because a green that depends
+  on a missing tool is a red that has not happened yet.
+- `lib/mcp-server.mjs` is under `allowJs + checkJs + strict` — the only reason that happened is that
+  `check-jsdoc.mjs` now asserts its own list covers every file in `lib/`, so a new module cannot be added
+  outside the type-checking perimeter.
+- Full gate **22 arms GATE GREEN ×3**; `check-i18n` PASS with the 0.8.0 entry in all ten CHANGELOGs.
+
 ## 0.7.0 — 2026-11-23
 
 > Published 2026-11-23T18:54:04.951Z (registry `time` for 0.7.0, read from the packument, not from a commit date).

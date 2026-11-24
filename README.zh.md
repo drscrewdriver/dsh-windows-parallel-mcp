@@ -5,7 +5,7 @@
 > 一个让代理驱动**自己**的 Windows 窗口的 DSH 插件——默认静默，按需可见。窗口接受窗口消息时完全不夺焦点；只有 UI Automation 可达时，焦点仅发生一次有界闪烁并自动还原；显式请求接管档时，光标移动到目标点并始终还原，HUD 提供三种中断方式。其他情况一律拒绝，并给出代码与原因。
 
 > **English canonical text follows.** The localized summary above is the orientation; the text below is the authoritative specification (structure, commands and numbers are identical across all 10 languages).
-> **Current release: 0.7.0** — this document describes the contract as of that version. What
+> **Current release: 0.8.0** — this document describes the contract as of that version. What
 > changed in it, and in every version before it, is in [CHANGELOG.md](CHANGELOG.md), newest first.
 
 A DSH plugin that lets an agent drive **its own** Windows windows — quietly by default, and visibly
@@ -14,6 +14,11 @@ exposes UI Automation, you lose focus for one bounded flash that is reversed aut
 explicitly ask for the takeover tier, the cursor moves to the point and is always restored, with a
 HUD that can stop it three ways. Everywhere else it refuses, with a code and a reason — never with
 silence: every refusal carries a code from a closed set of seventeen and the next step.
+
+**It ships in two forms over one engine, and 0.8.0 did not replace the first one.** Inside DSH it is a
+plugin (`apply()` on the host half, PowerShell sidecar underneath). Outside it, the same package is an
+MCP server over stdio (`bin: wpm-mcp`), whose tool list is generated from the same contract file — see
+"The second form" below.
 
 **The takeover tier defaults off, and that is structural.** The cursor is only ever moved because you
 opened `takeoverAllowed` **and** asked for it on the call (`takeover:true`), so an upgrade cannot
@@ -368,6 +373,51 @@ failed`) rather than swallowed: a log that looks complete and is not is worse th
 is missing lines. This is the only artifact that survives a call, and it is the one thing that can
 answer "what did the agent do to this machine" after the fact.
 
+## The second form: MCP over stdio (0.8.0)
+
+The same plugin is also an MCP server, and it is the same code rather than a re-implementation of it.
+`lib/mcp-server.mjs` registers the tool by calling the very `apply()` the DSH host calls, and forwards
+`tools/call` into the same `toRequest()` / gate order / `format()` path, so the eleven actions, the
+seventeen refusal codes, the policy ceiling and the audit line are identical in both forms. That is why
+the engine files were not touched to add it: a second implementation of a permission is a permission
+that can be reached around by using the other copy.
+
+**One tool, not eleven.** `tools/list` exposes `wpm` with an `action` discriminator, generated from
+`src/schema/tools.json` — one `oneOf` branch per action, whose `properties`, `required` and
+`additionalProperties` are that action's declaration copied field for field. Nothing in the server
+spells out an action name, a parameter name or a code, and `scripts/check-mcp-schema.mjs` is the reason
+that stays true: it starts the real server, reads what a client would read, and compares it to the file.
+Its self-test mutates both sides on purpose — four edits to the generator must turn the gate red, and two
+edits to the *contract* (rename a parameter, flip `additionalProperties`) must stay green AND move,
+because an arm that only breaks the generator cannot tell a generated schema from a transcribed one that
+happens to agree today.
+
+**Settings come from the environment, never from the call.** `WPM_POLICY`, `WPM_TAKEOVER_ALLOWED`,
+`WPM_APP_LAUNCH_ALLOWED`, `WPM_APP_LAUNCH_ALLOW` and the rest of the `WPM_*` set are read at start-up
+and only if present — the defaults stay in `lib/index.js`, because a second copy of a default is a
+default that drifts. A client that could raise its own ceiling or add itself to the launch whitelist
+would make the authorization model decorative, which is the same reason the DSH form reads settings
+from the profile rather than from the prompt.
+
+**A picture is attached as pixels, because a path is not portable.** The DSH form renders the screenshot
+file it wrote; a caller on the other end of a pipe cannot open it, so `tools/call` returns the PNG as
+base64 `image` content alongside the text. The text is never replaced by it — `screenRect`, `scale`,
+`identity`, `frame` and `captureBackend` stay in the first block, and across the DSH bridge, where a
+host that cannot accept image input projects the picture into a text diagnostic, those numbers still
+arrive. `WPM_MCP_NO_IMAGE=1` opts out.
+
+**Refusals survive the trip.** A refused call comes back with `isError` and the code as the first token
+of the text, unsoftened. Over the DSH bridge the refusal is re-raised as an error whose message is that
+text, so `policy_denied` still reads as `policy_denied` at the far end — asserted, not assumed, in
+`test/mcp-bridge.mjs`, which drives the SDK and the bridge code the host actually ships.
+
+**The transport is the only new attack surface, and it is a pipe.** JSON-RPC 2.0 over stdin/stdout with
+Node built-ins and zero dependencies: one JSON object per line, replies keyed by `id` because the worker
+is asynchronous, notifications answered with nothing, a non-JSON line answered with `-32700` and a null
+`id` without killing the loop, an unknown method answered `-32601` without killing the loop, and stdin
+closing meaning "dispose the sidecar and exit 0". Everything that is not a protocol line goes to stderr
+— `console.log` in the plugin half would otherwise print into the JSON stream and corrupt it.
+
 ## What it does not do
 
 - **No mouse injection.** `MOUSEEVENTF_*`, `mouse_event` and `keybd_event` are banned in every
@@ -381,6 +431,10 @@ answer "what did the agent do to this machine" after the fact.
 - **No OCR / Set-of-Marks / pixel fallback.** Not part of this claim, and already done well elsewhere.
 - **No watchdog.** The restore is one-shot and happens inline. A watchdog that keeps chasing the
   foreground would fight you.
+- **No HTTP, no SSE, no OAuth, no TLS.** Two forms exist and neither has a network face: in-process for
+  DSH, stdio for MCP. "No network surface" is not a hardening claim, it is the absence of one — there is
+  nothing to authenticate against, nothing to listen on, and nothing that keeps running when the caller
+  goes away.
 - **Terminals are still refused** (`terminal_no_door`), and now for a measured reason. The 0.2.0 plan
   was to drive one by typing into it; two probes say otherwise on this host: 242 `KEYEVENTF_UNICODE`
   events with the terminal in the foreground and Enter sent produced nothing, and a scan-code arm
@@ -400,6 +454,22 @@ call, not at plugin load.
 
 `engines.dsh` is an explicit two-sided range. There is no runtime version probing and no silent
 degradation.
+
+Since 0.8.0 the same package is also an MCP server, and nothing about the install above changes — the
+two forms are parallel entries, not a migration:
+
+```bash
+# stdio, configured by the environment of whoever starts it
+WPM_POLICY=balanced npx dsh-windows-parallel-mcp # via bin: wpm-mcp
+# or, from a checkout
+node lib/mcp-server.mjs
+```
+
+Point any MCP client at that command; `server.json` (shipped in the tarball) is the MCP Registry
+manifest for it, with the namespace `io.github.drscrewdriver/dsh-windows-parallel-mcp` and the npm
+package as its ownership proof. A DSH profile can bridge it instead of loading the plugin directly
+(`@deepseek-ai/dsh-mcp-client`, stdio transport), which registers the tool as `mcp__<serverName>__wpm`;
+`test/mcp-bridge.mjs` drives that bridge with the host's own client SDK and tool-definition code.
 
 ## Typed surface
 
@@ -561,6 +631,33 @@ unmeasured end-to-end and is stated as such in [docs/refusals.md](docs/refusals.
   unchanged whitelist file list: adding `launch`/`window` did not open a door to `MOUSEEVENTF_*`,
   `mouse_event` or `keybd_event`.
 
+### 0.8.0's measurements
+
+- **A hand-written JSON-RPC loop over stdio is enough** (the 0.8.0 prerequisite probe): `initialize`,
+  `tools/list` and `tools/call` all answer, an unknown method returns `-32601` and the process survives
+  it, a notification produces no reply line, two requests in flight are matchable by id, a non-JSON line
+  does not kill the transport, and closing stdin exits 0. Fifteen assertions, zero dependencies —
+  `@modelcontextprotocol/sdk` is not needed and is not used.
+- **The host's SDK is the stricter judge than our own harness.** `test/mcp-bridge.mjs` connects
+  `@modelcontextprotocol/client` 2.2.0 (the version the DSH install ships) to our server and validates
+  the shapes we emit. Its negotiation throws when the server answers with a protocol revision the
+  client does not list, which is why `PROTOCOL_VERSIONS` in `lib/mcp-server.mjs` is checked against that
+  SDK's constants (latest `2025-11-25`) rather than guessed from a document.
+- **A picture the host cannot display still delivers its numbers.** Across the bridge with no attachment
+  store mounted, a `screenshot` call does not throw: the bridge projects the image block into an
+  `[image unavailable: …]` text diagnostic and the `screenRect` / `scale` / `identity` / `frame` /
+  `captureBackend` line arrives regardless. Attaching pixels by default is safe because of that
+  measurement, not in spite of it.
+- **`tools/list` follows the contract file, in both directions.** Renaming `caretPosition` in
+  `src/schema/tools.json` changes what the running server reports, and flipping one
+  `additionalProperties` changes it too — both are gate arms (`scripts/check-mcp-schema.mjs --self-test`),
+  so the claim "generated, not copied" is exercised rather than asserted in prose.
+- **The install artifact is what was tested.** The 0.7.0 release was smoked from the unpacked tarball
+  (`npm pack` → unpack → drive the policy ceiling, both launch gates, the clipboard length-not-payload
+  rule and the audit rows: 17 assertions) and that run found two things the working tree could not show:
+  the `clipboard` headline does not name which op ran, and the launch gate is only observable once the
+  ceiling lets the call reach it. Both are recorded rather than papered over.
+
 ## Verifying the copy you actually installed
 
 Every test above imports the repository checkout, so a package that installs to the wrong place or ships
@@ -568,6 +665,12 @@ a stale `lib/` would still pass all of them. `node test/smoke-installed.mjs <pat
 drives the **installed** copy: it lists a real window, runs a takeover click, asserts
 `takeover=on cursorRestored=true abortChord=…`, and checks that the HUD is torn down afterwards. Run once
 against the desktop profile after installing, as the last step of a release.
+
+The stdio form has the same discipline: unpack the tarball and start `lib/mcp-server.mjs` from the
+unpacked directory (not from the checkout). `scripts/check-mcp-schema.mjs` and `test/mcp-bridge.mjs` both
+spawn the server by path, so pointing them at the unpacked copy is the whole procedure. The 0.7.0 tag
+was pushed after that run; a release that skips it is asserting that the shipped bytes work by
+showing that the source does.
 
 ## License
 

@@ -1,0 +1,109 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.drscrewdriver/dsh-windows-parallel-mcp",
+  "title": "Windows Parallel",
+  "description": "Drive one Windows window through eleven declared actions, choosing the cheapest door that can reach the target: window messages for a classic control (zero foreground changes), one bounded self-reversing UI Automation flash when only a pattern can reach it, and an opt-in takeover tier where the real cursor moves and is always restored. Writes are read back and the effect value names who reported success; screenshots name the capture path that painted them. Refusals carry a code that names the switch or the missing fact, the policy ceiling is set by the process owner and never by a call, and every action appends one audit row that records decisions and lengths but never the content typed or copied. Windows only, PowerShell 5.1 sidecar, zero install dependencies, no mouse-event injection.",
+  "version": "0.8.0",
+  "repository": {
+    "url": "https://github.com/drscrewdriver/dsh-windows-parallel-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/drscrewdriver/dsh-windows-parallel-mcp#readme",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "dsh-windows-parallel-mcp",
+      "version": "0.8.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "WPM_POLICY",
+          "description": "Authorization ceiling over all eleven actions: readonly | quiet | balanced | full. Default balanced. A call above it is refused with policy_denied, and the next step is to raise this setting, not to retry."
+        },
+        {
+          "name": "WPM_TAKEOVER_ALLOWED",
+          "description": "Capability switch for the takeover tier (the real cursor moving to the action point). Default false, and it is not implied by WPM_POLICY=full: both are needed."
+        },
+        {
+          "name": "WPM_KEY_INJECT_ALLOWED",
+          "description": "Capability switch for keyInput:'inject' (synthetic keyboard input into the foreground target). Default false."
+        },
+        {
+          "name": "WPM_APP_LAUNCH_ALLOWED",
+          "description": "Capability switch for the launch action. Default false; nothing may start while it is off."
+        },
+        {
+          "name": "WPM_APP_LAUNCH_ALLOW",
+          "description": "Comma-separated exact-name whitelist for launch (case-folded, no wildcard, no prefix match). Empty by default. A whitelist vouches for a program, not for the arguments it is given; both the target and the arguments are written to the audit log."
+        },
+        {
+          "name": "WPM_POLICY_IDLE_MS",
+          "description": "How long the owner must have been away from the keyboard before a takeover-grade action is allowed. Default 3000. While they are active the call is refused with user_active rather than interrupting them; no dialog is offered instead."
+        },
+        {
+          "name": "WPM_OVERLAY",
+          "description": "The click-through overlay and the global pause chord (Ctrl+Alt+Q). Default true -- a visible aid that tells the human something is being driven. Set false only if the hotkey cannot be registered on this machine."
+        },
+        {
+          "name": "WPM_ENABLED",
+          "description": "Master switch. Default true. False refuses every action with paused before anything is touched -- a switched-off plugin does not so much as start its sidecar."
+        },
+        {
+          "name": "WPM_SETTLE_MS",
+          "description": "How long the engine waits after a write before it reads the control back. Default 350. The read-back prediction is built after this window, so a value that is too small reports readbackMismatch rather than lying about success."
+        },
+        {
+          "name": "WPM_REQUEST_TIMEOUT_MS",
+          "description": "Budget for one sidecar round trip. Default 20000."
+        },
+        {
+          "name": "WPM_POWERSHELL_PATH",
+          "description": "Absolute path to the PowerShell executable, for a machine where powershell.exe is not on PATH. Default empty (find it the usual way)."
+        },
+        {
+          "name": "WPM_LOG_WORKER_STDERR",
+          "description": "Forward the sidecar's stderr to this server's stderr. Default false; switch it on when a worker dies before answering."
+        },
+        {
+          "name": "WPM_TAKEOVER_MAX_MS",
+          "description": "Longest a single takeover may hold the cursor. Default 10000, clamped 500-60000; it is a ceiling on the tier, not a way to opt in."
+        },
+        {
+          "name": "WPM_TAKEOVER_ARM_MS",
+          "description": "The HUD's arm phase before the cursor moves. Default 800, so a human sees it coming and can use the stop button or the pause chord."
+        },
+        {
+          "name": "WPM_SNAPSHOT_MAX_ELEMENTS",
+          "description": "Element cap for one snapshot. Default 300, clamped 1-5000, and the number actually used is reported back on the result rather than assumed."
+        },
+        {
+          "name": "WPM_SCREENSHOT_MAX_WIDTH",
+          "description": "Resize width for screenshots. Default 0 = no scaling, because a silently rescaled picture makes every coordinate the model reads wrong. Any scaling is stated on the result as scale/identity."
+        },
+        {
+          "name": "WPM_SHOTS_KEEP",
+          "description": "How many recent screenshots to retain. Default 10, clamped 1-200."
+        },
+        {
+          "name": "WPM_AUDIT_KEEP",
+          "description": "How many newest rows of %LOCALAPPDATA%\\wpm\\audit.log to retain. Default 2000."
+        },
+        {
+          "name": "WPM_MCP_NO_IMAGE",
+          "description": "Set to 1 to stop attaching screenshot pixels as base64 image content; the text result still names the file, the rect, the scale and the capture backend."
+        }
+      ]
+    }
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "platform": "windows",
+      "requires": "Windows PowerShell 5.1 (ships with Windows) and Node >= 20. No install dependencies; no build step.",
+      "sameEngineTwoForms": "lib/index.js is the DSH plugin half and lib/mcp-server.mjs is this stdio half; both drive one PowerShell engine, so the actions, the refusal vocabulary, the gates and the audit log are identical in either form.",
+      "schemaSource": "tools/list is generated from src/schema/tools.json at start-up -- the action surface is declared once."
+    }
+  }
+}
