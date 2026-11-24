@@ -5,9 +5,9 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.8.1 — 2026-11-23
+## 0.8.1 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+> Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).
 
 **One shipped file that a registry would have refused.** 0.8.0's `server.json` carried an 800-character
 `description`; the Registry's own JSON Schema (2025-12-11) caps that field at 100 characters, and ajv said

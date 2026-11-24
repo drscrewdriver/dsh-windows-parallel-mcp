@@ -1,6 +1,7 @@
 node_modules/
 .tmp/
 *.log
+*.tgz
 proof/
 targets.json
 resident.log
@@ -9,3 +10,7 @@ resident.log
 # which is how it keeps "clone and install" free of a toolchain. It was ignored while the package was
 # still a reservation; leaving that line in would have meant committing a plugin whose entry point
 # does not exist in the repository.
+
+# *.tgz is `npm pack` output. It is the artifact whose sha1 the release check compares against the
+# registry, so it has to stay reproducible rather than committed -- and three stale tarballs showing up
+# in `git status` is how a release commit ends up carrying a binary nobody reviewed.

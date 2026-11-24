@@ -8,9 +8,9 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.8.1 — 2026-11-23
+## 0.8.1 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+> Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).
 
 > 0.8.1 只修一个被注册中心会拒绝的文件：0.8.0 的 server.json 里 description 写了 800 字符，而 Registry 的 JSON Schema（2025-12-11）把这个字段上限设为 100，ajv 一行就说明白了。插件行为没有任何问题——MCP 服务、动作、闸、审计与 0.8.0 逐字节相同——但清单是列表找到包的方式，被拒收的清单等于一个只存在于仓库里的交付形态。修法：description 缩成 92 字符的一句话，能力说明移到 _meta 的 publisher-provided（Registry 真正保留的位置，上限 4KB，这里约 1.2KB）；schema-test 从此断言 Registry 的限制本身（description 1..100、title 1..100、name 反向 DNS 形式且 ≤200、版本必须是具体值而不是范围、_meta ≤4096 字节、每个声明的环境变量都要有 name），原有的「声明==读取」双向核对保留；package.json / dsh.plugin.json / server.json / README 版本行统一 0.8.1，dsh.plugin.json 的描述补上 0.8.0 起就漏掉的第二种交付形态。发现方式和本仓大多数缺陷一样：拿真的东西跑一次检查——Registry schema 是为 0.8.0 发版重新抓取的（计划 R7 说它处于 preview，规则可能变），校验用的是 DSH 安装树里已有的 ajv，所以「server.json 通过校验」是一条有退出码的命令，不是一个意见。
 

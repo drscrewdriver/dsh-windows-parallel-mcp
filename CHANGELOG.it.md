@@ -8,9 +8,9 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.8.1 — 2026-11-23
+## 0.8.1 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+> Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).
 
 > 0.8.1 corregge un solo file spedito che un registry avrebbe rifiutato: la `description` di server.json di 0.8.0 era di 800 caratteri e il JSON Schema del Registry (2025-12-11) limita quel campo a 100; ajv lo ha detto in una riga. Nel comportamento del plugin non c'era nulla di sbagliato -- server MCP, azioni, porte e audit sono identici byte a byte a 0.8.0 -- ma il manifesto è il modo in cui un elenco trova il pacchetto, e un manifesto rifiutato è una forma di consegna che esiste solo nel repository. Correzione: `description` diventa una frase di 92 caratteri, e la prosa sulle capacità passa in `_meta` sotto `publisher-provided` (la chiave che il Registry conserva davvero, tetto 4 KB; qui circa 1,2 KB). schema-test verifica ora i limiti del registry stessi (description 1..100, title 1..100, name reverse-DNS entro 200 caratteri, una versione concreta e non un range, `_meta` sotto 4096 byte, e un name per ogni variabile d'ambiente dichiarata); il controllo bidirezionale «dichiarato == letto» resta. package.json / dsh.plugin.json / server.json / la riga di versione del README passano a 0.8.1, e la descrizione di dsh.plugin.json nomina infine la seconda forma di consegna, omessa da 0.8.0. Trovato come la maggior parte dei difetti qui: eseguendo il controllo contro la cosa reale. Lo schema del Registry è stato ripresa per il rilascio 0.8.0 (il piano R7 avverte che il registro è in preview e le regole possono muoversi) e la validazione gira con l'ajv già presente nell'albero DSH, quindi «server.json valida» è un comando con un exit code, non un'opinione.
 

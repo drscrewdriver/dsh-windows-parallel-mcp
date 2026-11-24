@@ -8,9 +8,9 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.8.1 — 2026-11-23
+## 0.8.1 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+> Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).
 
 > 0.8.1 ne corrige qu'un fichier livré qu'un registre aurait refusé. Le `description` de server.json de 0.8.0 faisait 800 caractères alors que le JSON Schema du Registry (2025-12-11) limite ce champ à 100 ; ajv l'a dit en une ligne. Rien dans le comportement du plugin n'était faux — le serveur MCP, les actions, les portes et l'audit sont identiques octet à octet à 0.8.0 — mais le manifeste est la façon dont une liste trouve le paquet, et un manifeste refusé est une forme de livraison qui n'existe que dans le dépôt. Correction : `description` devient une phrase de 92 caractères, et le texte de capacité passe dans `_meta` sous `publisher-provided` (la clé que le Registry conserve vraiment, plafond 4 Ko, ici environ 1,2 Ko). schema-test vérifie désormais les limites du registre elles-mêmes (description 1..100, title 1..100, name en reverse-DNS sous 200 caractères, une version concrète et non une plage, `_meta` sous 4096 octets, et un name pour chaque variable d'environnement déclarée) ; le contrôle bidirectionnel « déclaré == lu » reste. package.json / dsh.plugin.json / server.json / la ligne de version du README passent à 0.8.1, et la description de dsh.plugin.json nomme enfin la seconde forme de livraison, oubliée depuis 0.8.0. Trouvé comme la plupart des défauts ici : en lançant la vérification contre la chose réelle. Le schéma du Registry a été re-téléchargé pour la sortie de 0.8.0 (le plan R7 prévient que le registre est en preview et que ses règles peuvent bouger) et la validation tourne avec l'ajv déjà présent dans l'arborescence DSH, donc « server.json valide » est une commande avec un code de retour, pas une opinion.
 

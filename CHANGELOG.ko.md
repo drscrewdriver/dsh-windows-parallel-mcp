@@ -8,9 +8,9 @@ Dates are the registry `time` values for each version, not git commit dates — 
 when someone typed, a publish time records when a version became installable, and only the second
 one is a promise to anyone installing it.
 
-## 0.8.1 — 2026-11-23
+## 0.8.1 — 2026-11-24
 
-> Published <REGISTRY-TIME> (registry `time` for 0.8.1, read from the packument, not from a commit date).
+> Published 2026-11-24T01:35:11.785Z (registry `time` for 0.8.1, read from the packument, not from a commit date).
 
 > 0.8.1 은 레지스트리가 거절할 수 있는 출하 파일 하나만 고친다. 0.8.0 의 server.json description 은 800 자였고 Registry JSON Schema(2025-12-11) 는 이 칸을 100 자로 막아 ajv 가 한 줄로 말했다. 동작상 문제는 없다 — MCP 서버도 액션도 게이트도 감사도 0.8.0 과 바이트 단위 동일 — 하지만 매니페스트는 목록이 패키지를 찾는 통로이고, 거절되는 매니페스트는 저장소 안에만 존재하는 출하 형태다. 고친 방법: description 을 92 자 한 문장으로 줄이고 능력 설명은 Registry 가 실제로 보존하는 자리(_meta publisher-provided, 4KB 상한, 이번 것은 약 1.2KB) 로 옮겼다. schema-test 는 이후 레지스트리 제한 자체를 검증한다(description 1..100, title 1..100, name 은 reverse-DNS 형식에 200 자 이내, 버전은 범위가 아닌 구체값, _meta 4096 바이트 미만, 선언된 모든 환경 변수에 name 이 존재). 기존 '선언==읽기' 양방향 대조는 그대로. package.json / dsh.plugin.json / server.json / README 버전 표기를 0.8.1 로 통일하고, 0.8.0 부터 빠져 있던 두 번째 출하 형태를 dsh.plugin.json 설명에 보탰다. 발견은 이 프로젝트 대다수 결함처럼 진짜를 상대로 검사를 돌려서였다. Registry 스키마는 0.8.0 출시를 위해 다시 가져왔고(계획 R7: preview 라 규정이 움직일 수 있다), 검증은 DSH 설치 트리에 있는 ajv 로 했으므로 'server.json 검증 통과'는 의견이 아니라 종료 코드를 가진 한 번의 명령이다.
 
